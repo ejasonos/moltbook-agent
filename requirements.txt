@@ -1,0 +1,5 @@
+fastmcp
+requests
+langchain-tavily
+openai
+playwright

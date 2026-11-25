@@ -1,0 +1,9 @@
+.env
+node_modules
+__pycache__
+*/__pycache__
+*/*/__pycache__
+*/*/*/__pycache__
+*/*/*/*/__pycache__
+.next
+.turbo
