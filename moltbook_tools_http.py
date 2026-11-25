@@ -1,1464 +1,614 @@
 from __future__ import annotations
 
-import os
+import hashlib
 import json
-import inspect
 import logging
-import time
-from functools import wraps
-from urllib.request import Request, urlopen
-
-from fastmcp import FastMCP
-from fastmcp.server.middleware import Middleware, MiddlewareContext
+import os
+from typing import Any
 from dotenv import load_dotenv
-
-from config.settings import load_settings
-from workspace.manager import WorkspaceManager
-
-from tools.filesystem.read_many import (
-    DEFAULT_MAX_TOTAL_READ_BYTES,
-    MAX_FILE_READ_BYTES,
-    read_files as _read_files,
-)
-from tools.filesystem.read import read_file as _read_file
-from tools.filesystem.write import write_file as _write_file
-from tools.filesystem.edit import edit_file as _edit_file
-from tools.filesystem.delete import delete_file as _delete_file
-from tools.filesystem.search import search_files as _search_files
-from tools.filesystem.tree import directory_tree as _directory_tree
-
-from tools.git.status import git_status as _git_status
-from tools.git.diff import git_diff as _git_diff
-from tools.git.history import git_history as _git_history
-from tools.git.operations import (
-    git_add as _git_add,
-    git_unstage as _git_unstage,
-    git_commit as _git_commit,
-    git_create_branch as _git_create_branch,
-    git_switch_branch as _git_switch_branch,
-    git_delete_branch as _git_delete_branch,
-    git_restore as _git_restore,
-)
-from tools.shell.execute import (
-    execute_command as _execute_command,
-)
-from tools.shell.process import (
-    start_process as _start_process,
-    process_status as _process_status,
-    stop_process as _stop_process,
-    remove_process as _remove_process,
-)
-from tools.shell.editing import (
-    quote_argument as _quote_argument,
-    build_command as _build_command,
-    parse_command as _parse_command,
-    inspect_command as _inspect_command,
-)
-
-from tools.web.search import web_search as _web_search
-from tools.web.open import open_url as _open_url
-from tools.web.extract import (
-    extract_text as _extract_text,
-    extract_links as _extract_links,
-)
-from tools.web.download import (
-    download_file as _download_file,
-)
-
-from tools.browser.lifecycle import (
-    browser_launch as _browser_launch,
-    browser_close as _browser_close,
-    browser_status as _browser_status,
-)
-
-from tools.browser.navigation import (
-    browser_goto as _browser_goto,
-    browser_back as _browser_back,
-    browser_forward as _browser_forward,
-    browser_reload as _browser_reload,
-    browser_current_page as _browser_current_page,
-)
-
-from tools.browser.interaction import (
-    browser_click as _browser_click,
-    browser_double_click as _browser_double_click,
-    browser_fill as _browser_fill,
-    browser_type as _browser_type,
-    browser_press as _browser_press,
-    browser_select as _browser_select,
-    browser_check as _browser_check,
-    browser_uncheck as _browser_uncheck,
-    browser_hover as _browser_hover,
-)
-
-from tools.browser.inspection import (
-    browser_page_text as _browser_page_text,
-    browser_page_snapshot as _browser_page_snapshot,
-    browser_element_text as _browser_element_text,
-    browser_element_attribute as _browser_element_attribute,
-    browser_element_exists as _browser_element_exists,
-    browser_page_html as _browser_page_html,
-)
-
-from tools.browser.console import (
-    browser_get_console as _browser_get_console,
-    browser_clear_console as _browser_clear_console,
-)
-
-from tools.browser.network import (
-    browser_get_requests as _browser_get_requests,
-    browser_get_responses as _browser_get_responses,
-    browser_get_failed_requests as _browser_get_failed_requests,
-    browser_clear_network as _browser_clear_network,
-)
-
-from tools.browser.waiting import (
-    BrowserWaitState,
-    browser_wait as _browser_wait,
-)
-
-from tools.browser.viewport import (
-    browser_screenshot as _browser_screenshot,
-    browser_set_viewport as _browser_set_viewport,
-    browser_scroll as _browser_scroll,
-)
-
-from tools.conversion.documents import (
-    extract_document_text as _extract_document_text,
-    convert_document as _convert_document,
-)
-
-from tools.conversion.images import (
-    convert_image as _convert_image,
-)
-
-from tools.conversion.pdf import (
-    extract_pdf_text as _extract_pdf_text,
-    render_pdf_pages as _render_pdf_pages,
-    create_pdf as _create_pdf,
-)
-
-from tools.conversion.web import (
-    html_to_text as _html_to_text,
-    html_to_pdf as _html_to_pdf,
-)
-
-from tools.screenshots.capture import (
-    capture_screen as _capture_screen,
-    capture_region as _capture_region,
-    image_info as _image_info,
-    crop_image as _crop_image,
-    resize_image as _resize_image,
-)
-
-from tools.testing import (
-    run_tests as _run_tests,
-    run_test_file as _run_test_file,
-    run_linter as _run_linter,
-    run_formatter as _run_formatter,
-    run_formatter_check as _run_formatter_check,
-    run_typecheck as _run_typecheck,
-    run_build as _run_build,
-    collect_diagnostics as _collect_diagnostics,
-)
-
 load_dotenv()
 
-mcp = FastMCP("Local Agent Tools")
-AGENTSTATUS_URL = os.getenv("AGENTSTATUS_URL")
-logger = logging.getLogger(__name__)
+from fastmcp import FastMCP
+
+from integrations.moltbook.client import (
+    MoltbookClient,
+    MoltbookAPIError,
+)
+from integrations.moltbook.authentication import (
+    check_claim_status,
+    get_my_profile,
+)
+from integrations.moltbook.agents import (
+    get_agent_profile,
+    follow_agent,
+)
+from integrations.moltbook.feeds import (
+    get_feed,
+    get_posts,
+)
+from integrations.moltbook.posts import (
+    get_post,
+    create_post,
+)
+from integrations.moltbook.comments import (
+    get_comments,
+    create_comment,
+    reply_to_comment,
+)
+from integrations.moltbook.voting import (
+    upvote_post,
+    downvote_post,
+    upvote_comment,
+)
+from integrations.moltbook.search import search_moltbook
+from integrations.moltbook.communities import (
+    get_submolt,
+    subscribe_submolt,
+)
+from memory import SocialMemory
+from moltbook.policy import MoltPolicy
 
 
-def _report_agentstatus_call(
-    name: str,
-    duration_ms: int,
-    error: str = "",
-) -> None:
-    if not AGENTSTATUS_URL:
-        return
+# --------------------------------------------------
+# SERVER CONFIGURATION
+# --------------------------------------------------
 
-    payload = {
-        "name": name,
-        "arguments": {},
-        "duration_ms": duration_ms,
-        "error": error[:800],
-        "source": "sdk",
-        "kind": "mcp",
-    }
-    try:
-        request = Request(
-            AGENTSTATUS_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
+logging.basicConfig(
+    level=os.getenv("MOLT_LOG_LEVEL", "INFO"),
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+
+logger = logging.getLogger("moltbook.mcp")
+
+mcp = FastMCP("Moltbook")
+
+client = MoltbookClient()
+
+policy = MoltPolicy()
+
+_memory: SocialMemory | None = None
+
+
+def get_memory() -> SocialMemory:
+    global _memory
+
+    if _memory is None:
+        _memory = SocialMemory(
+            database_path=os.getenv(
+                "MOLTBOOK_MEMORY_DB",
+                "data/molt_memory.db",
+            )
         )
-        with urlopen(request, timeout=2):
-            pass
-    except Exception as exc:
-        logger.warning("AgentStatus event was not delivered: %s", type(exc).__name__)
+
+    return _memory
 
 
-class AgentStatusMiddleware(Middleware):
-    async def on_call_tool(self, context: MiddlewareContext, call_next):
-        started = time.perf_counter()
-        error = ""
-        try:
-            result = await call_next(context)
-            if getattr(result, "is_error", False):
-                error = "MCP tool returned an error"
-            return result
-        except Exception as exc:
-            error = type(exc).__name__
-            raise
-        finally:
-            _report_agentstatus_call(
-                context.message.name,
-                int((time.perf_counter() - started) * 1000),
-                error,
+# --------------------------------------------------
+# INTERNAL HELPERS
+# --------------------------------------------------
+
+def _make_action_key(
+    action: str,
+    target_id: str,
+    payload: dict[str, Any],
+) -> str:
+
+    canonical = json.dumps(
+        {
+            "action": action,
+            "target_id": target_id,
+            "payload": payload,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+
+    return hashlib.sha256(
+        canonical.encode("utf-8")
+    ).hexdigest()
+
+
+def _execute_write(
+    action: str,
+    target_id: str,
+    payload: dict[str, Any],
+    operation,
+) -> dict[str, Any]:
+
+    if not policy.is_allowed(action):
+        return {
+            "success": False,
+            "error": f"Action is disabled by Molt policy: {action}",
+        }
+
+    memory = get_memory()
+
+    action_key = _make_action_key(
+        action,
+        target_id,
+        payload,
+    )
+
+    created = memory.record_interaction(
+        interaction_key=action_key,
+        interaction_type=action,
+        target_id=target_id,
+        content=json.dumps(
+            payload,
+            ensure_ascii=False,
+        ),
+    )
+
+    if not created:
+        return {
+            "success": False,
+            "status": "duplicate_or_previous_attempt",
+            "message": (
+                "This exact action has already been recorded. "
+                "It will not be automatically repeated."
+            ),
+        }
+
+    try:
+        result = operation()
+
+        # Some Moltbook responses require a verification step.
+        # Do not incorrectly mark these as completed.
+        if isinstance(result, dict) and result.get("verification"):
+            memory.store.update_interaction_status(
+                action_key,
+                "pending",
             )
 
+            return {
+                "success": False,
+                "status": "verification_required",
+                "result": result,
+            }
 
-mcp.add_middleware(AgentStatusMiddleware())
+        memory.store.update_interaction_status(
+            action_key,
+            "success",
+        )
 
+        return {
+            "success": True,
+            "result": result,
+        }
 
-# =========================================================
-# WORKSPACE
-# =========================================================
+    except Exception as exc:
 
-WORKSPACE = os.getenv(
-    "AGENT_WORKSPACE",
-    os.getcwd(),
-)
+        memory.store.update_interaction_status(
+            action_key,
+            "failed",
+        )
 
-settings = load_settings(WORKSPACE)
+        logger.exception(
+            "Moltbook write action failed: %s",
+            action,
+        )
 
-workspace = WorkspaceManager(
-    settings.require_workspace(),
-    allow_delete=settings.allow_delete,
-    allow_write=True,
-    allow_git_write=settings.allow_git_write,
-    allow_shell=settings.allow_shell,
-    allow_network=settings.allow_network,
-)
-
-
-def _network_required(function):
-    if inspect.iscoroutinefunction(function):
-        @wraps(function)
-        async def checked_async(*args, **kwargs):
-            workspace.check_network()
-            return await function(*args, **kwargs)
-
-        return checked_async
-
-    @wraps(function)
-    def checked(*args, **kwargs):
-        workspace.check_network()
-        return function(*args, **kwargs)
-
-    return checked
+        return {
+            "success": False,
+            "error": str(exc),
+        }
 
 
-# =========================================================
-# TESTING TOOLS
-# =========================================================
+def _read(operation):
+
+    try:
+        return {
+            "success": True,
+            "result": operation(),
+        }
+
+    except Exception as exc:
+
+        logger.exception("Moltbook read operation failed.")
+
+        return {
+            "success": False,
+            "error": str(exc),
+        }
+
+
+# --------------------------------------------------
+# ACCOUNT AND IDENTITY TOOLS
+# --------------------------------------------------
 
 @mcp.tool()
-def run_tests(
-    command: str | None = None,
-    cwd: str | None = None,
-    timeout: int = 120,
+def molt_check_claim_status() -> dict:
+    """Check whether Moltbook account ownership has been verified."""
+
+    return _read(
+        lambda: check_claim_status(client)
+    )
+
+
+@mcp.tool()
+def molt_get_my_profile() -> dict:
+    """Retrieve Molt's own Moltbook profile."""
+
+    return _read(
+        lambda: get_my_profile(client)
+    )
+
+
+@mcp.tool()
+def molt_get_agent_profile(agent_name: str) -> dict:
+    """Retrieve another Moltbook agent's public profile."""
+
+    return _read(
+        lambda: get_agent_profile(client, agent_name)
+    )
+
+
+# --------------------------------------------------
+# FEED AND DISCOVERY TOOLS
+# --------------------------------------------------
+
+@mcp.tool()
+def molt_get_feed(
+    sort: str = "hot",
+    limit: int = 25,
 ) -> dict:
-    return _run_tests(
-        workspace,
-        command,
-        cwd=cwd,
-        timeout=timeout,
+    """Read Molt's personalized Moltbook feed."""
+
+    if sort not in {"hot", "new", "top", "rising"}:
+        return {"success": False, "error": "Invalid feed sort."}
+
+    limit = max(1, min(limit, 50))
+
+    return _read(
+        lambda: get_feed(
+            client,
+            sort=sort,
+            limit=limit,
+        )
     )
 
 
 @mcp.tool()
-def run_test_file(
-    path: str,
-    command: str | None = None,
-    timeout: int = 120,
+def molt_get_posts(
+    sort: str = "new",
+    limit: int = 25,
+    submolt: str | None = None,
 ) -> dict:
-    return _run_test_file(
-        workspace,
-        path,
-        command=command,
-        timeout=timeout,
+    """Browse public Moltbook posts."""
+
+    if sort not in {"hot", "new", "top", "rising"}:
+        return {"success": False, "error": "Invalid post sort."}
+
+    limit = max(1, min(limit, 50))
+
+    return _read(
+        lambda: get_posts(
+            client,
+            sort=sort,
+            limit=limit,
+            submolt=submolt,
+        )
     )
 
 
 @mcp.tool()
-def run_linter(
-    command: str | None = None,
-    timeout: int = 120,
+def molt_get_post(post_id: str) -> dict:
+    """Read one Moltbook post by its ID."""
+
+    return _read(
+        lambda: get_post(client, post_id)
+    )
+
+
+@mcp.tool()
+def molt_get_comments(
+    post_id: str,
+    sort: str = "best",
+    limit: int = 35,
 ) -> dict:
-    return _run_linter(
-        workspace,
-        command,
-        timeout=timeout,
+    """Read the comments and replies on a Moltbook post."""
+
+    if sort not in {"best", "new", "old", "top"}:
+        return {"success": False, "error": "Invalid comment sort."}
+
+    limit = max(1, min(limit, 100))
+
+    return _read(
+        lambda: get_comments(
+            client,
+            post_id,
+            sort=sort,
+            limit=limit,
+        )
     )
 
 
 @mcp.tool()
-def run_formatter_check(
-    command: str | None = None,
-    timeout: int = 120,
-) -> dict:
-    return _run_formatter_check(
-        workspace,
-        command,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-def run_formatter(
-    command: str | None = None,
-    timeout: int = 120,
-) -> dict:
-    return _run_formatter(
-        workspace,
-        command,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-def run_typecheck(
-    command: str | None = None,
-    timeout: int = 120,
-) -> dict:
-    return _run_typecheck(
-        workspace,
-        command,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-def run_build(
-    command: str | None = None,
-    timeout: int = 300,
-) -> dict:
-    return _run_build(
-        workspace,
-        command,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-def collect_diagnostics(
-    result: dict,
-) -> dict:
-    return _collect_diagnostics(result)
-
-# =========================================================
-# SCREENSHOT / IMAGE TOOLS
-# =========================================================
-
-@mcp.tool()
-def capture_screen(
-    output_path: str,
-) -> dict[str, object]:
-    """Capture the primary screen."""
-
-    return _capture_screen(
-        workspace,
-        output_path,
-    )
-
-
-@mcp.tool()
-def capture_region(
-    output_path: str,
-    x: int,
-    y: int,
-    width: int,
-    height: int,
-) -> dict[str, object]:
-    """Capture a rectangular screen region."""
-
-    return _capture_region(
-        workspace,
-        output_path,
-        x,
-        y,
-        width,
-        height,
-    )
-
-
-@mcp.tool()
-def image_info(
-    path: str,
-) -> dict[str, object]:
-    """Inspect image dimensions and metadata."""
-
-    return _image_info(
-        workspace,
-        path,
-    )
-
-
-@mcp.tool()
-def crop_image(
-    source_path: str,
-    output_path: str,
-    left: int,
-    top: int,
-    right: int,
-    bottom: int,
-) -> dict[str, object]:
-    """Crop an image."""
-
-    return _crop_image(
-        workspace,
-        source_path,
-        output_path,
-        left,
-        top,
-        right,
-        bottom,
-    )
-
-
-@mcp.tool()
-def resize_image(
-    source_path: str,
-    output_path: str,
-    width: int,
-    height: int | None = None,
-) -> dict[str, object]:
-    """Resize an image."""
-
-    return _resize_image(
-        workspace,
-        source_path,
-        output_path,
-        width,
-        height,
-    )
-
-# =========================================================
-# CONVERSION TOOLS
-# =========================================================
-
-@mcp.tool()
-def extract_document_text(
-    path: str,
-) -> dict[str, object]:
-    """Extract readable text from a supported document."""
-
-    return _extract_document_text(
-        workspace,
-        path,
-    )
-
-
-@mcp.tool()
-def convert_document(
-    source_path: str,
-    output_path: str,
-    output_format: str,
-) -> dict[str, object]:
-    """Convert a supported document to another format."""
-
-    return _convert_document(
-        workspace,
-        source_path,
-        output_path,
-        output_format,
-    )
-
-
-@mcp.tool()
-def convert_image(
-    source_path: str,
-    output_path: str,
-    output_format: str | None = None,
-    width: int | None = None,
-    height: int | None = None,
-) -> dict[str, object]:
-    """Convert, resize, or re-encode an image."""
-
-    return _convert_image(
-        workspace,
-        source_path,
-        output_path,
-        output_format=output_format,
-        width=width,
-        height=height,
-    )
-
-
-@mcp.tool()
-def extract_pdf_text(
-    path: str,
-) -> dict[str, object]:
-    """Extract text from a PDF document."""
-
-    return _extract_pdf_text(
-        workspace,
-        path,
-    )
-
-
-@mcp.tool()
-def render_pdf_pages(
-    path: str,
-    output_directory: str,
-    start_page: int = 1,
-    end_page: int | None = None,
-    dpi: int = 150,
-) -> dict[str, object]:
-    """Render PDF pages into PNG images."""
-
-    return _render_pdf_pages(
-        workspace,
-        path,
-        output_directory,
-        start_page=start_page,
-        end_page=end_page,
-        dpi=dpi,
-    )
-
-
-@mcp.tool()
-def create_pdf(
-    text: str,
-    output_path: str,
-) -> dict[str, object]:
-    """Create a PDF from plain text."""
-
-    return _create_pdf(
-        workspace,
-        text,
-        output_path,
-    )
-
-
-@mcp.tool()
-def html_to_text(
-    path: str,
-) -> dict[str, object]:
-    """Convert an HTML file into readable text."""
-
-    return _html_to_text(
-        workspace,
-        path,
-    )
-
-
-@mcp.tool()
-@_network_required
-def html_to_pdf(
-    source_path: str,
-    output_path: str,
-) -> dict[str, object]:
-    """Convert an HTML file into a PDF."""
-
-    return _html_to_pdf(
-        workspace,
-        source_path,
-        output_path,
-    )
-
-# =========================================================
-# BROWSER TOOLS
-# =========================================================
-
-@mcp.tool()
-async def browser_launch(
-    headless: bool = True,
-    viewport_width: int = 1280,
-    viewport_height: int = 900,
-) -> dict[str, object]:
-    """Start the persistent Chromium session; use before browser navigation."""
-
-    return await _browser_launch(
-        headless=headless,
-        viewport_width=viewport_width,
-        viewport_height=viewport_height,
-    )
-
-
-@mcp.tool()
-async def browser_close() -> dict[str, object]:
-    """Close the persistent browser session."""
-
-    return await _browser_close()
-
-
-@mcp.tool()
-async def browser_status() -> dict[str, object]:
-    """Return browser session status."""
-
-    return await _browser_status()
-
-
-@mcp.tool()
-@_network_required
-async def browser_goto(
-    url: str,
-    timeout: int = 30_000,
-) -> dict[str, object]:
-    """Open a webpage for interaction or inspection; web_search is for discovery."""
-
-    return await _browser_goto(
-        url,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-@_network_required
-async def browser_back(
-    timeout: int = 30_000,
-) -> dict[str, object]:
-    """Navigate back in the browser's page history."""
-
-    return await _browser_back(
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-@_network_required
-async def browser_forward(
-    timeout: int = 30_000,
-) -> dict[str, object]:
-    """Navigate forward in the browser's page history."""
-
-    return await _browser_forward(
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-@_network_required
-async def browser_reload(
-    timeout: int = 30_000,
-) -> dict[str, object]:
-    """Reload the current page and wait for DOM content."""
-
-    return await _browser_reload(
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-async def browser_current_page() -> dict[str, object]:
-    """Return the current URL and page title."""
-
-    return await _browser_current_page()
-
-
-@mcp.tool()
-@_network_required
-async def browser_click(
-    selector: str,
-    timeout: int = 10_000,
-) -> dict[str, object]:
-    """Click a page element using a Playwright locator selector."""
-
-    return await _browser_click(
-        selector,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-@_network_required
-async def browser_double_click(
-    selector: str,
-    timeout: int = 10_000,
-) -> dict[str, object]:
-    """Double-click a page element using a Playwright locator selector."""
-
-    return await _browser_double_click(
-        selector,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-@_network_required
-async def browser_fill(
-    selector: str,
-    value: str,
-    timeout: int = 10_000,
-) -> dict[str, object]:
-    """Replace an input's contents; prefer this over browser_type for forms."""
-
-    return await _browser_fill(
-        selector,
-        value,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-@_network_required
-async def browser_type(
-    selector: str,
-    text: str,
-    delay: int = 0,
-    timeout: int = 10_000,
-) -> dict[str, object]:
-    """Type into an element with per-character events; use browser_fill for forms."""
-
-    return await _browser_type(
-        selector,
-        text,
-        delay=delay,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-@_network_required
-async def browser_press(
-    selector: str,
-    key: str,
-    timeout: int = 10_000,
-) -> dict[str, object]:
-    """Press a Playwright key on an element, such as Enter or Control+A."""
-
-    return await _browser_press(
-        selector,
-        key,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-@_network_required
-async def browser_select(
-    selector: str,
-    value: str,
-    timeout: int = 10_000,
-) -> dict[str, object]:
-    """Select an option by value, label, or index in a select element."""
-
-    return await _browser_select(
-        selector,
-        value,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-@_network_required
-async def browser_check(
-    selector: str,
-    timeout: int = 10_000,
-) -> dict[str, object]:
-    """Check a checkbox or radio control."""
-
-    return await _browser_check(
-        selector,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-@_network_required
-async def browser_uncheck(
-    selector: str,
-    timeout: int = 10_000,
-) -> dict[str, object]:
-    """Uncheck a checkbox control."""
-
-    return await _browser_uncheck(
-        selector,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-@_network_required
-async def browser_hover(
-    selector: str,
-    timeout: int = 10_000,
-) -> dict[str, object]:
-    """Hover an element to reveal menus or hover-dependent content."""
-
-    return await _browser_hover(
-        selector,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-async def browser_page_text(
-    max_length: int = 100_000,
-) -> dict[str, object]:
-    """Read visible text from the current page."""
-
-    return await _browser_page_text(
-        max_length=max_length,
-    )
-
-
-@mcp.tool()
-async def browser_page_snapshot() -> dict[str, object]:
-    """List visible headings and controls with role/name selectors for browser actions."""
-
-    return await _browser_page_snapshot()
-
-
-@mcp.tool()
-async def browser_element_text(
-    selector: str,
-    timeout: int = 10_000,
-) -> dict[str, object]:
-    """Read text from an element."""
-
-    return await _browser_element_text(
-        selector,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-async def browser_element_attribute(
-    selector: str,
-    attribute: str,
-    timeout: int = 10_000,
-) -> dict[str, object]:
-    """Read an element attribute."""
-
-    return await _browser_element_attribute(
-        selector,
-        attribute,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-async def browser_element_exists(
-    selector: str,
-) -> dict[str, object]:
-    """Check whether an element exists."""
-
-    return await _browser_element_exists(
-        selector
-    )
-
-
-@mcp.tool()
-async def browser_page_html(
-    selector: str | None = None,
-    max_length: int = 200_000,
-) -> dict[str, object]:
-    """Inspect page or element HTML."""
-
-    return await _browser_page_html(
-        selector,
-        max_length=max_length,
-    )
-
-
-@mcp.tool()
-async def browser_get_console(
-    limit: int = 100,
-) -> list[dict[str, object]]:
-    """Return captured browser console messages."""
-
-    return await _browser_get_console(
-        limit=limit
-    )
-
-
-@mcp.tool()
-async def browser_clear_console() -> dict[str, object]:
-    """Clear captured browser console messages."""
-
-    return await _browser_clear_console()
-
-
-@mcp.tool()
-async def browser_get_requests(
-    limit: int = 100,
-) -> list[dict[str, object]]:
-    """Return captured network requests."""
-
-    return await _browser_get_requests(
-        limit=limit
-    )
-
-
-@mcp.tool()
-async def browser_get_responses(
-    limit: int = 100,
-) -> list[dict[str, object]]:
-    """Return captured network responses."""
-
-    return await _browser_get_responses(
-        limit=limit
-    )
-
-
-@mcp.tool()
-async def browser_get_failed_requests(
-    limit: int = 100,
-) -> list[dict[str, object]]:
-    """Show requests that failed before receiving an HTTP response."""
-
-    return await _browser_get_failed_requests(limit=limit)
-
-
-@mcp.tool()
-async def browser_clear_network() -> dict[str, object]:
-    """Clear captured network activity."""
-
-    return await _browser_clear_network()
-
-
-@mcp.tool()
-async def browser_screenshot(
-    path: str | None = None,
-    full_page: bool = False,
-) -> dict[str, object]:
-    """Capture a screenshot of the current page."""
-
-    output_path = (
-        str(workspace.write_path(path))
-        if path is not None
-        else None
-    )
-
-    return await _browser_screenshot(
-        output_path,
-        full_page=full_page,
-    )
-
-
-@mcp.tool()
-@_network_required
-async def browser_set_viewport(
-    width: int,
-    height: int,
-) -> dict[str, object]:
-    """Change the browser viewport size."""
-
-    return await _browser_set_viewport(
-        width,
-        height,
-    )
-
-
-@mcp.tool()
-@_network_required
-async def browser_scroll(
-    x: int = 0,
-    y: int = 0,
-) -> dict[str, object]:
-    """Scroll the current page."""
-
-    return await _browser_scroll(
-        x,
-        y,
-    )
-
-
-@mcp.tool()
-@_network_required
-async def browser_wait(
-    selector: str | None = None,
-    state: BrowserWaitState = "domcontentloaded",
-    timeout: int = 10_000,
-) -> dict[str, object]:
-    """Wait for page load or a selector state; use after navigation or dynamic actions."""
-
-    return await _browser_wait(
-        selector=selector,
-        state=state,
-        timeout=timeout,
-    )
-
-# =========================================================
-# WEB TOOLS
-# =========================================================
-
-@mcp.tool()
-@_network_required
-def web_search(
+def molt_search(
     query: str,
-    max_results: int = 5,
-) -> dict[str, object]:
-    """
-    Search the public web with Tavily and return structured results.
-    """
-
-    return _web_search(
-        query,
-        max_results=max_results,
-    )
-
-
-@mcp.tool()
-@_network_required
-def web_open(
-    url: str,
-    timeout: int = 30,
-) -> dict[str, object]:
-    """
-    Retrieve a public HTTP or HTTPS URL.
-    """
-
-    return _open_url(
-        url,
-        timeout=timeout,
-    )
-
-
-@mcp.tool()
-def web_extract_text(
-    html: str,
-    max_length: int = 100_000,
-) -> dict[str, object]:
-    """
-    Extract readable text from an HTML document.
-    """
-
-    return _extract_text(
-        html,
-        max_length=max_length,
-    )
-
-
-@mcp.tool()
-def web_extract_links(
-    html: str,
-    max_results: int = 200,
-) -> list[dict[str, str]]:
-    """
-    Extract hyperlinks from an HTML document.
-    """
-
-    return _extract_links(
-        html,
-        max_results=max_results,
-    )
-
-
-@mcp.tool()
-@_network_required
-def web_download(
-    url: str,
-    path: str,
-    timeout: int = 60,
-) -> dict[str, object]:
-    """
-    Download a remote resource into the agent workspace.
-    """
-
-    return _download_file(
-        workspace,
-        url,
-        path,
-        timeout=timeout,
-    )
-
-# =========================================================
-# SHELL TOOLS
-# =========================================================
-
-@mcp.tool()
-def execute_command(
-    command: str,
-    cwd: str | None = None,
-    timeout: int = 120,
-    env: dict[str, str] | None = None,
-) -> dict[str, object]:
-    """
-    Execute a shell command inside the agent workspace.
-
-    Returns stdout, stderr, return code, and execution status.
-    """
-
-    return _execute_command(
-        workspace,
-        command,
-        cwd=cwd,
-        timeout=timeout,
-        env=env,
-    )
-
-
-@mcp.tool()
-def start_process(
-    command: str,
-    cwd: str | None = None,
-    env: dict[str, str] | None = None,
-) -> dict[str, object]:
-    """
-    Start a persistent background process.
-
-    Returns a process_id that can be used with process_status
-    and stop_process.
-    """
-
-    return _start_process(
-        workspace,
-        command,
-        cwd=cwd,
-        env=env,
-    )
-
-
-@mcp.tool()
-def process_status(
-    process_id: str,
-) -> dict[str, object]:
-    """Return the current status and captured output of a process."""
-
-    return _process_status(
-        process_id,
-    )
-
-
-@mcp.tool()
-def stop_process(
-    process_id: str,
-    force: bool = False,
-) -> dict[str, object]:
-    """Stop a running managed process."""
-
-    return _stop_process(
-        process_id,
-        force=force,
-    )
-
-
-@mcp.tool()
-def remove_process(
-    process_id: str,
-) -> dict[str, object]:
-    """Remove a completed process from the process registry."""
-
-    return _remove_process(
-        process_id,
-    )
-
-
-@mcp.tool()
-def quote_shell_argument(
-    value: str,
-) -> str:
-    """Safely quote one shell argument."""
-
-    return _quote_argument(value)
-
-
-@mcp.tool()
-def build_shell_command(
-    executable: str,
-    arguments: list[str] | None = None,
-) -> str:
-    """Build a shell command with individually quoted arguments."""
-
-    return _build_command(
-        executable,
-        arguments,
-    )
-
-
-@mcp.tool()
-def parse_shell_command(
-    command: str,
-) -> list[str]:
-    """Parse a shell command into executable and arguments."""
-
-    return _parse_command(command)
-
-
-@mcp.tool()
-def inspect_shell_command(
-    command: str,
-) -> dict[str, object]:
-    """Inspect a shell command without executing it."""
-
-    return _inspect_command(command)
-
-# =========================================================
-# GIT TOOLS
-# =========================================================
-
-@mcp.tool()
-def git_status() -> dict[str, object]:
-    """Return the current Git repository status."""
-
-    return _git_status(workspace)
-
-
-@mcp.tool()
-def git_diff(
-    staged: bool = False,
-    path: str | None = None,
-) -> dict[str, object]:
-    """
-    Return Git changes.
-
-    By default returns unstaged changes.
-    Set staged=True to inspect staged changes.
-    """
-
-    return _git_diff(
-        workspace,
-        staged=staged,
-        path=path,
-    )
-
-
-@mcp.tool()
-def git_history(
     limit: int = 20,
-    path: str | None = None,
-) -> list[dict[str, str]]:
-    """Return recent Git commit history."""
+) -> dict:
+    """Search Moltbook for relevant posts, agents and discussions."""
 
-    return _git_history(
-        workspace,
-        limit=limit,
-        path=path,
+    if not query.strip():
+        return {"success": False, "error": "Search query is empty."}
+
+    limit = max(1, min(limit, 50))
+
+    return _read(
+        lambda: search_moltbook(
+            client,
+            query,
+            limit=limit,
+        )
     )
 
 
-@mcp.tool()
-def git_add(
-    paths: list[str],
-) -> dict[str, object]:
-    """Stage specific files or directories for a Git commit."""
-
-    return _git_add(
-        workspace,
-        paths,
-    )
-
+# --------------------------------------------------
+# POSTING TOOLS
+# --------------------------------------------------
 
 @mcp.tool()
-def git_unstage(
-    paths: list[str],
-) -> dict[str, object]:
-    """Remove specific files from the Git staging area."""
-
-    return _git_unstage(
-        workspace,
-        paths,
-    )
-
-
-@mcp.tool()
-def git_commit(
-    message: str,
-) -> dict[str, object]:
-    """
-    Commit currently staged Git changes.
-
-    Only changes already in the staging area are committed.
-    """
-
-    return _git_commit(
-        workspace,
-        message,
-    )
-
-
-@mcp.tool()
-def git_create_branch(
-    branch: str,
-    checkout: bool = False,
-) -> dict[str, object]:
-    """
-    Create a local Git branch.
-
-    Set checkout=True to switch to it immediately.
-    """
-
-    return _git_create_branch(
-        workspace,
-        branch,
-        checkout=checkout,
-    )
-
-
-@mcp.tool()
-def git_switch_branch(
-    branch: str,
-) -> dict[str, object]:
-    """Switch to an existing local Git branch."""
-
-    return _git_switch_branch(
-        workspace,
-        branch,
-    )
-
-
-@mcp.tool()
-def git_delete_branch(
-    branch: str,
-    force: bool = False,
-) -> dict[str, object]:
-    """
-    Delete a local Git branch.
-
-    force=False preserves Git's normal safety checks.
-    """
-
-    return _git_delete_branch(
-        workspace,
-        branch,
-        force=force,
-    )
-
-
-@mcp.tool()
-def git_restore(
-    paths: list[str],
-    staged: bool = False,
-) -> dict[str, object]:
-    """
-    Restore Git changes for specific paths.
-
-    By default restores working-tree changes.
-    Set staged=True to restore the index.
-    """
-
-    return _git_restore(
-        workspace,
-        paths,
-        staged=staged,
-    )
-
-# =========================================================
-# FILESYSTEM TOOLS
-# =========================================================
-
-@mcp.tool()
-def read_file(
-    path: str,
-    start_line: int | None = None,
-    end_line: int | None = None,
-) -> str:
-    """Read a text file inside the agent workspace."""
-
-    return _read_file(
-        workspace,
-        path,
-        start_line,
-        end_line,
-    )
-
-
-@mcp.tool()
-def read_files(
-    paths: list[str],
-    max_bytes_per_file: int = MAX_FILE_READ_BYTES,
-    max_total_bytes: int = DEFAULT_MAX_TOTAL_READ_BYTES,
-) -> dict[str, object]:
-    """Read up to 20 workspace files in one call with per-file and total size limits."""
-
-    return _read_files(
-        workspace,
-        paths,
-        max_bytes_per_file=max_bytes_per_file,
-        max_total_bytes=max_total_bytes,
-    )
-
-
-@mcp.tool()
-def write_file(
-    path: str,
+def molt_create_post(
+    submolt: str,
+    title: str,
     content: str,
-) -> str:
-    """Write text content to a file inside the agent workspace."""
+) -> dict:
+    """Publish an original post in a Moltbook community."""
 
-    return _write_file(
-        workspace,
-        path,
-        content,
+    if not submolt.strip() or not title.strip() or not content.strip():
+        return {
+            "success": False,
+            "error": "Submolt, title and content are required.",
+        }
+
+    payload = {
+        "submolt": submolt,
+        "title": title,
+        "content": content,
+    }
+
+    return _execute_write(
+        action="create_post",
+        target_id=submolt,
+        payload=payload,
+        operation=lambda: create_post(
+            client,
+            submolt,
+            title,
+            content,
+        ),
     )
 
 
 @mcp.tool()
-def edit_file(
-    path: str,
-    old_text: str,
-    new_text: str,
-    replace_all: bool = False,
-) -> str:
-    """Replace text inside a file in the agent workspace."""
+def molt_create_comment(
+    post_id: str,
+    content: str,
+) -> dict:
+    """Comment on an existing Moltbook post."""
 
-    return _edit_file(
-        workspace,
-        path,
-        old_text,
-        new_text,
-        replace_all=replace_all,
+    if not post_id.strip() or not content.strip():
+        return {
+            "success": False,
+            "error": "Post ID and comment content are required.",
+        }
+
+    payload = {"content": content}
+
+    return _execute_write(
+        action="create_comment",
+        target_id=post_id,
+        payload=payload,
+        operation=lambda: create_comment(
+            client,
+            post_id,
+            content,
+        ),
     )
 
 
 @mcp.tool()
-def delete_file(
-    path: str,
-) -> str:
-    """Delete a file or directory inside the agent workspace."""
+def molt_reply_to_comment(
+    post_id: str,
+    comment_id: str,
+    content: str,
+) -> dict:
+    """Reply to a specific comment within a Moltbook post."""
 
-    return _delete_file(
-        workspace,
-        path,
+    if not post_id.strip() or not comment_id.strip() or not content.strip():
+        return {
+            "success": False,
+            "error": "Post ID, comment ID and content are required.",
+        }
+
+    payload = {
+        "comment_id": comment_id,
+        "content": content,
+    }
+
+    return _execute_write(
+        action="reply_to_comment",
+        target_id=comment_id,
+        payload=payload,
+        operation=lambda: reply_to_comment(
+            client,
+            post_id,
+            comment_id,
+            content,
+        ),
+    )
+
+
+# --------------------------------------------------
+# VOTING TOOLS
+# --------------------------------------------------
+
+@mcp.tool()
+def molt_upvote_post(post_id: str) -> dict:
+    """Upvote a post that Molt considers valuable."""
+
+    return _execute_write(
+        action="upvote_post",
+        target_id=post_id,
+        payload={},
+        operation=lambda: upvote_post(client, post_id),
     )
 
 
 @mcp.tool()
-def search_files(
-    query: str,
-    path: str = ".",
-    extensions: list[str] | None = None,
-    max_results: int = 100,
-) -> list[dict[str, object]]:
-    """Search text files inside the agent workspace."""
+def molt_downvote_post(post_id: str) -> dict:
+    """Downvote a post when Molt has a justified reason."""
 
-    return _search_files(
-        workspace,
-        query,
-        path,
-        extensions=extensions,
-        max_results=max_results,
+    return _execute_write(
+        action="downvote_post",
+        target_id=post_id,
+        payload={},
+        operation=lambda: downvote_post(client, post_id),
     )
 
 
 @mcp.tool()
-def directory_tree(
-    path: str = ".",
-    max_depth: int = 4,
-) -> str:
-    """Return a readable directory tree."""
+def molt_upvote_comment(comment_id: str) -> dict:
+    """Upvote a valuable Moltbook comment."""
 
-    return _directory_tree(
-        workspace,
-        path,
-        max_depth=max_depth,
+    return _execute_write(
+        action="upvote_comment",
+        target_id=comment_id,
+        payload={},
+        operation=lambda: upvote_comment(client, comment_id),
     )
 
-# =========================================================
-# SERVER
-# =========================================================
+
+# --------------------------------------------------
+# SOCIAL NETWORK TOOLS
+# --------------------------------------------------
+
+@mcp.tool()
+def molt_follow_agent(agent_name: str) -> dict:
+    """Follow an agent whose contributions are consistently valuable."""
+
+    return _execute_write(
+        action="follow_agent",
+        target_id=agent_name,
+        payload={},
+        operation=lambda: follow_agent(client, agent_name),
+    )
+
+
+@mcp.tool()
+def molt_get_submolt(name: str) -> dict:
+    """Retrieve information about a Moltbook community."""
+
+    return _read(
+        lambda: get_submolt(client, name)
+    )
+
+
+@mcp.tool()
+def molt_subscribe_submolt(name: str) -> dict:
+    """Subscribe to a relevant Moltbook community."""
+
+    return _execute_write(
+        action="subscribe_submolt",
+        target_id=name,
+        payload={},
+        operation=lambda: subscribe_submolt(client, name),
+    )
+
+
+# --------------------------------------------------
+# PERSISTENT MEMORY TOOLS
+# --------------------------------------------------
+
+@mcp.tool()
+def molt_remember(
+    content: str,
+    category: str = "general",
+    topic: str | None = None,
+    importance: int = 3,
+) -> dict:
+    """Save useful information to Molt's persistent SQLite memory."""
+
+    try:
+        memory = get_memory()
+
+        memory.remember(
+            content=content,
+            category=category,
+            topic=topic,
+            importance=importance,
+        )
+
+        return {
+            "success": True,
+            "message": "Memory saved.",
+        }
+
+    except Exception as exc:
+        logger.exception("Memory save failed.")
+
+        return {
+            "success": False,
+            "error": str(exc),
+        }
+
+
+@mcp.tool()
+def molt_search_memory(query: str) -> dict:
+    """Retrieve relevant information from Molt's persistent memory."""
+
+    try:
+        return {
+            "success": True,
+            "memories": get_memory().search_memories(query),
+        }
+
+    except Exception as exc:
+        logger.exception("Memory retrieval failed.")
+
+        return {
+            "success": False,
+            "error": str(exc),
+        }
+
+
+@mcp.tool()
+def molt_get_recent_memories(limit: int = 10) -> dict:
+    """Retrieve Molt's most important recent memories."""
+
+    limit = max(1, min(limit, 30))
+
+    try:
+        return {
+            "success": True,
+            "memories": get_memory().get_recent_memories(limit),
+        }
+
+    except Exception as exc:
+        logger.exception("Memory retrieval failed.")
+
+        return {
+            "success": False,
+            "error": str(exc),
+        }
+
+
+# --------------------------------------------------
+# SERVER ENTRY POINT
+# --------------------------------------------------
 
 if __name__ == "__main__":
-    print(f"Agent workspace: {workspace.root}")
 
-    # mcp.run() # Use mcp.run() and npx @modelcontextprotocol/inspector python fastmcp_tools_http.py for local testing
-    
+    if not os.getenv("MOLTBOOK_API_KEY"):
+        raise RuntimeError(
+            "MOLTBOOK_API_KEY is missing. Configure your environment first."
+        )
+
+    logger.info("Starting Moltbook MCP server.")
+
     mcp.run(
         transport="http",
-        host=os.getenv("MCP_HOST", "127.0.0.1"),
-        port=int(os.getenv("MCP_PORT", "8082")),
+        host="127.0.0.1",
+        port=8001,
     )

@@ -40,6 +40,7 @@ class MoltPolicy:
         restrictions = {
             "create_post": self.allow_posts,
             "create_comment": self.allow_comments,
+            "downvote_post": self.allow_votes,
             "reply_to_comment": self.allow_replies,
             "upvote_post": self.allow_votes,
             "upvote_comment": self.allow_votes,
