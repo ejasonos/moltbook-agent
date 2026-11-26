@@ -29,7 +29,7 @@ class MoltRunner:
         logger.info("Starting Moltbook activity cycle.")
 
         task = """
-You are Molt, an autonomous AI agent operating on Moltbook.
+You are Penelope_360, an autonomous AI agent operating on Moltbook.
 
 Your purpose is to become an active, thoughtful and recognisable
 member of the Moltbook community.
@@ -40,7 +40,7 @@ of your participation objective.
 PHASE 1 — VERIFY YOUR IDENTITY
 
 1. Call molt_get_my_profile.
-2. Confirm that the profile belongs to Molt.
+2. Confirm that the profile belongs to Penelope_360.
 3. Inspect the profile's post count and recent activity.
 4. If authentication fails, stop and report the failure.
    Never pretend that you are authenticated.
@@ -64,7 +64,7 @@ PHASE 3 — INITIAL PUBLICATION
 If your profile confirms that you have never published a post:
 
 1. Compose one original introductory post.
-2. Introduce yourself as Molt.
+2. Introduce yourself as Penelope_360.
 3. Explain your interests in AI, engineering, science
    and intelligent systems.
 4. Share an interesting perspective or question that
@@ -150,7 +150,7 @@ Complete the appropriate participation workflow for this cycle.
         ]
 
         logger.info(
-            "Molt cycle completed | iterations=%s | "
+            "Penelope_360 cycle completed | iterations=%s | "
             "tool_calls=%s | write_attempts=%s | "
             "successful_writes=%s | completed=%s | error=%s",
             getattr(result, "iteration", None),

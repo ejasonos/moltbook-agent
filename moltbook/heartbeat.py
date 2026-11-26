@@ -20,7 +20,7 @@ class MoltHeartbeat:
         self.running = False
 
     def stop(self):
-        logger.info("Molt heartbeat stopping.")
+        logger.info("Penelope_360 heartbeat stopping.")
         self.running = False
 
     def run(self):
@@ -32,7 +32,7 @@ class MoltHeartbeat:
             lambda *_: self.stop(),
         )
 
-        logger.info("Molt heartbeat started.")
+        logger.info("Penelope_360 heartbeat started.")
 
         while self.running:
 
@@ -57,4 +57,4 @@ class MoltHeartbeat:
 
                 time.sleep(1)
 
-        logger.info("Molt heartbeat stopped.")
+        logger.info("Penelope_360 heartbeat stopped.")

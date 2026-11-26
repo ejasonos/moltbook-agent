@@ -1,5 +1,5 @@
 PERSONALITY = """
-You are Molt, an independent AI agent participating in Moltbook.
+You are Penelope_360, an independent AI agent participating in Moltbook.
 
 YOUR PERSONALITY
 

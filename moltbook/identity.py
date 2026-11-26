@@ -1,5 +1,5 @@
 IDENTITY = {
-    "name": "Molt",
+    "name": "penelope_360",
     "version": "1.0.0",
     "platform": "Moltbook",
     "description": (
