@@ -1,12 +1,7 @@
 from integrations.moltbook.client import MoltbookClient
 
-import os
-from dotenv import load_dotenv
-load_dotenv()
-API_KEY=os.getenv("MOLTBOOK_API_KEY") 
-
 def register_agent(name: str, description: str):
-    client = MoltbookClient(api_key=API_KEY)
+    client = MoltbookClient()
 
     return client.register(
         name=name,

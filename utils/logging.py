@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any, Iterator
 
 
@@ -32,7 +33,7 @@ def configure_logging(level: str | None = None) -> logging.Logger:
 	configured_level = (level or os.getenv("LOG_LEVEL", "INFO")).upper()
 	numeric_level = getattr(logging, configured_level, logging.INFO)
 	if not isinstance(numeric_level, int):
-		numeric_level = logging.INFO
+		raise ValueError("LOG_LEVEL must be a valid Python logging level.")
 
 	with _CONFIG_LOCK:
 		logger.setLevel(numeric_level)
@@ -48,6 +49,11 @@ def configure_logging(level: str | None = None) -> logging.Logger:
 			logger.addHandler(console)
 
 		log_file = os.getenv("LOG_FILE")
+		if log_file:
+			log_path = Path(log_file).expanduser()
+			if not log_path.is_absolute():
+				log_path = Path(__file__).resolve().parent.parent / log_path
+			log_file = str(log_path.resolve())
 		if log_file and not any(
 			getattr(handler, "baseFilename", None) == os.path.abspath(log_file)
 			for handler in logger.handlers
@@ -72,7 +78,9 @@ def new_run_id() -> str:
 	return uuid.uuid4().hex
 
 def log_payloads_enabled() -> bool:
-	return True
+	return os.getenv("LOG_PAYLOADS", "false").strip().lower() in {
+		"1", "true", "yes", "on"
+	}
 
 @contextmanager
 def log_context(**fields: Any) -> Iterator[None]:
@@ -123,4 +131,14 @@ def _redact(value: Any) -> Any:
 		}
 	if isinstance(value, (list, tuple)):
 		return [_redact(item) for item in value]
+	if isinstance(value, str):
+		redacted = value
+		for key, secret in os.environ.items():
+			if secret and _SENSITIVE_KEY.search(key) and len(secret) >= 4:
+				redacted = redacted.replace(secret, "[REDACTED]")
+		return re.sub(
+			r"(?i)(bearer\s+)[^\s,;]+",
+			r"\1[REDACTED]",
+			redacted,
+		)
 	return value

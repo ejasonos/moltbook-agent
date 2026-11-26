@@ -3,17 +3,19 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
 from agent.loop import AgentLoop, AgentLoopConfig
-from config.settings import AgentSettings
-from memory import SocialMemory
+from config.settings import load_settings
+from memory import SocialMemory, resolve_database_path
 from mcp_client.client import MCPClient
 from mcp_client.registry import ToolRegistry
 from model.factory import create_model_client
 from moltbook.context_manager import MoltContextManager
 from moltbook.policy import MoltPolicy
+from runtime.health import RuntimeHealth
 from workspace.manager import WorkspaceManager
 
 
@@ -25,6 +27,7 @@ class MoltRuntime:
     memory: SocialMemory
     policy: MoltPolicy
     context_manager: MoltContextManager
+    health: RuntimeHealth | None = None
 
     def close(self) -> None:
         try:
@@ -46,12 +49,7 @@ def create_runtime() -> MoltRuntime:
     # Load environment variables before constructing settings.
     load_dotenv(project_root / ".env")
 
-    os.environ.setdefault(
-        "MCP_URL",
-        "http://127.0.0.1:8001/mcp",
-    )
-
-    settings = AgentSettings()
+    settings = load_settings()
 
     if settings.model_provider.strip().lower() != "nvidia":
         raise RuntimeError(
@@ -68,6 +66,16 @@ def create_runtime() -> MoltRuntime:
         raise RuntimeError(
             "MCP_URL is not configured."
         )
+    mcp_url = urlparse(settings.mcp_url)
+    if mcp_url.scheme not in {"http", "https"} or not mcp_url.hostname or mcp_url.path != "/mcp":
+        raise RuntimeError(
+            "MCP_URL must point to the Moltbook MCP server's /mcp endpoint."
+        )
+    if not settings.nvidia_model.strip():
+        raise RuntimeError("NVIDIA_MODEL must be configured.")
+    nvidia_url = urlparse(settings.nvidia_endpoint)
+    if nvidia_url.scheme != "https" or not nvidia_url.hostname:
+        raise RuntimeError("NVIDIA_ENDPOINT must be an HTTPS endpoint.")
 
     # Model
     model = create_model_client(settings)
@@ -79,24 +87,25 @@ def create_runtime() -> MoltRuntime:
     # Establish the MCP connection and verify tool discovery.
     discovered_tools = registry.discover()
 
-    if not discovered_tools:
+    discovered_names = {tool.name for tool in discovered_tools}
+    required_tools = {"molt_get_my_profile", "molt_get_feed", "molt_create_comment"}
+    if not required_tools.issubset(discovered_names):
         mcp_client.http.close()
         raise RuntimeError(
-            "No MCP tools were discovered. "
-            "Check whether the Moltbook MCP server is running."
+            "The configured MCP endpoint did not expose the required Moltbook tools. "
+            "Check MCP_URL and start moltbook_tools_http.py."
         )
 
     # Persistent social memory
-    memory_path = os.getenv(
-        "MOLTBOOK_MEMORY_DB",
-        str(project_root / "data" / "molt_memory.db"),
-    )
+    memory_path = resolve_database_path(project_root=project_root)
 
     memory = SocialMemory(
         database_path=memory_path,
     )
 
-    policy = MoltPolicy()
+    policy = MoltPolicy(
+        heartbeat_interval=settings.moltbook_heartbeat_interval_seconds,
+    )
 
     context_manager = MoltContextManager(
         memory=memory,
@@ -125,8 +134,14 @@ def create_runtime() -> MoltRuntime:
         model_output_cost_per_million_tokens=(
             settings.model_output_cost_per_million_tokens
         ),
-        enable_subagents=False,
-        max_subagents_per_run=0,
+        enable_subagents=settings.enable_subagents,
+        max_subagents_per_run=settings.max_subagents_per_run,
+        max_subagent_iterations=settings.max_subagent_iterations,
+        max_subagent_tool_calls=settings.max_subagent_tool_calls,
+        max_subagent_task_chars=settings.max_subagent_task_chars,
+        max_runtime_seconds=settings.max_cycle_runtime_seconds,
+        max_social_actions_per_run=settings.max_social_actions_per_cycle,
+        max_candidate_posts_per_run=settings.max_candidate_posts,
     )
 
     agent_loop = AgentLoop(
@@ -138,7 +153,7 @@ def create_runtime() -> MoltRuntime:
         config=agent_config,
     )
 
-    return MoltRuntime(
+    runtime = MoltRuntime(
         agent_loop=agent_loop,
         mcp_client=mcp_client,
         registry=registry,
@@ -146,3 +161,5 @@ def create_runtime() -> MoltRuntime:
         policy=policy,
         context_manager=context_manager,
     )
+    runtime.health = RuntimeHealth(runtime)
+    return runtime

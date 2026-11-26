@@ -5,6 +5,8 @@ Environment variables can override the defaults.
 """
 
 import os
+import logging
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -36,6 +38,10 @@ from .defaults import (
     ALLOW_NETWORK,
     ALLOW_SHELL,
     LOG_LEVEL,
+    DEFAULT_MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS,
+    DEFAULT_MAX_CYCLE_RUNTIME_SECONDS,
+    DEFAULT_MAX_SOCIAL_ACTIONS_PER_CYCLE,
+    DEFAULT_MAX_CANDIDATE_POSTS,
 )
 
 
@@ -45,12 +51,12 @@ def _env_bool(name: str, default: bool) -> bool:
     if value is None:
         return default
 
-    return value.strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean value.")
 
 
 def _env_int(name: str, default: int) -> int:
@@ -61,8 +67,8 @@ def _env_int(name: str, default: int) -> int:
 
     try:
         return int(value)
-    except ValueError:
-        return default
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
 
 
 def _env_optional_float(name: str, default: float | None) -> float | None:
@@ -71,8 +77,8 @@ def _env_optional_float(name: str, default: float | None) -> float | None:
         return default
     try:
         return float(value)
-    except ValueError:
-        return default
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number.") from exc
 
 
 @dataclass
@@ -120,7 +126,7 @@ class AgentSettings:
     nvidia_model: str = field(
         default_factory=lambda: os.getenv(
             "NVIDIA_MODEL",
-            "nvidia/nemotron-3-ultra-550b-a55b",
+            DEFAULT_MODEL,
         )
     )
 
@@ -283,6 +289,34 @@ class AgentSettings:
         )
     )
 
+    moltbook_heartbeat_interval_seconds: int = field(
+        default_factory=lambda: _env_int(
+            "MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS",
+            DEFAULT_MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS,
+        )
+    )
+
+    max_cycle_runtime_seconds: int = field(
+        default_factory=lambda: _env_int(
+            "MAX_CYCLE_RUNTIME_SECONDS",
+            DEFAULT_MAX_CYCLE_RUNTIME_SECONDS,
+        )
+    )
+
+    max_social_actions_per_cycle: int = field(
+        default_factory=lambda: _env_int(
+            "MAX_SOCIAL_ACTIONS_PER_CYCLE",
+            DEFAULT_MAX_SOCIAL_ACTIONS_PER_CYCLE,
+        )
+    )
+
+    max_candidate_posts: int = field(
+        default_factory=lambda: _env_int(
+            "MAX_CANDIDATE_POSTS",
+            DEFAULT_MAX_CANDIDATE_POSTS,
+        )
+    )
+
     # Workspace
     workspace: Path | None = None
 
@@ -336,6 +370,33 @@ def load_settings(
 
     settings = AgentSettings()
 
+    if settings.max_iterations < 1 or settings.max_tool_calls < 1:
+        raise ValueError("MAX_ITERATIONS and MAX_TOOL_CALLS must be positive.")
+    if settings.max_context_messages < 1 or settings.max_context_tokens < 1:
+        raise ValueError("Context limits must be positive.")
+    if settings.moltbook_heartbeat_interval_seconds < 1:
+        raise ValueError("MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS must be positive.")
+    if settings.max_cycle_runtime_seconds < 1:
+        raise ValueError("MAX_CYCLE_RUNTIME_SECONDS must be positive.")
+    if settings.max_social_actions_per_cycle < 1:
+        raise ValueError("MAX_SOCIAL_ACTIONS_PER_CYCLE must be positive.")
+    if settings.max_candidate_posts < 1:
+        raise ValueError("MAX_CANDIDATE_POSTS must be positive.")
+    for name in ("command_timeout", "tool_timeout", "max_subagent_iterations", "max_subagent_tool_calls"):
+        if getattr(settings, name) < 1:
+            raise ValueError(f"{name.upper()} must be positive.")
+    if settings.max_subagents_per_run < 0:
+        raise ValueError("MAX_SUBAGENTS_PER_RUN cannot be negative.")
+    if settings.max_subagent_task_chars < 1:
+        raise ValueError("MAX_SUBAGENT_TASK_CHARS must be positive.")
+    for name in ("model_input_cost_per_million_tokens", "model_output_cost_per_million_tokens"):
+        value = getattr(settings, name)
+        if value is not None and (not math.isfinite(value) or value < 0):
+            raise ValueError(f"{name.upper()} must be a finite non-negative number.")
+    settings.model_provider = settings.model_provider.strip().lower()
+    settings.log_level = settings.log_level.strip().upper()
+    if settings.log_level not in logging._nameToLevel:
+        raise ValueError("LOG_LEVEL must be a valid Python logging level.")
     if workspace is not None:
         settings.set_workspace(workspace)
 

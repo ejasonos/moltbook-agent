@@ -29,7 +29,10 @@ CREATE TABLE IF NOT EXISTS interactions (
     target_id TEXT NOT NULL,
     content TEXT,
     created_at TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending'
+    status TEXT NOT NULL DEFAULT 'pending',
+    updated_at TEXT,
+    resource_id TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS memories (
@@ -72,6 +75,14 @@ CREATE TABLE IF NOT EXISTS pending_followups (
     due_at TEXT,
     status TEXT NOT NULL DEFAULT 'pending',
     created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS post_topics (
+    post_id TEXT NOT NULL,
+    topic_id INTEGER NOT NULL,
+    PRIMARY KEY (post_id, topic_id),
+    FOREIGN KEY (post_id) REFERENCES posts(post_id),
+    FOREIGN KEY (topic_id) REFERENCES topics(topic_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_memories_topic

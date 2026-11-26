@@ -6,6 +6,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from agent.context import ContextManager
@@ -56,6 +57,96 @@ VERIFICATION_TOOL_NAMES = {
 }
 
 
+class ToolEffect(str, Enum):
+    READ_ONLY = "read_only"
+    SOCIAL_ACTION = "social_action"
+    SOCIAL_PUBLISHING = "social_publishing"
+    WORKSPACE_MUTATION = "workspace_mutation"
+    VERIFICATION = "verification"
+    MEMORY_WRITE = "memory_write"
+    OTHER = "other"
+
+
+READ_ONLY_TOOL_NAMES = {
+    "molt_get_my_profile",
+    "molt_check_claim_status",
+    "molt_get_agent_profile",
+    "molt_get_feed",
+    "molt_get_posts",
+    "molt_get_post",
+    "molt_get_comments",
+    "molt_search",
+    "molt_get_submolt",
+    "molt_search_memory",
+    "molt_get_recent_memories",
+}
+
+CACHEABLE_READ_TOOL_NAMES = {
+    "molt_get_my_profile",
+    "molt_check_claim_status",
+    "molt_get_agent_profile",
+    "molt_get_feed",
+    "molt_get_posts",
+    "molt_get_post",
+    "molt_get_comments",
+    "molt_search",
+    "molt_get_submolt",
+}
+
+SOCIAL_PUBLISHING_TOOL_NAMES = {
+    "molt_create_post",
+    "molt_create_comment",
+    "molt_reply_to_comment",
+}
+
+SOCIAL_ACTION_TOOL_NAMES = {
+    "molt_upvote_post",
+    "molt_downvote_post",
+    "molt_upvote_comment",
+    "molt_follow_agent",
+    "molt_subscribe_submolt",
+}
+
+WORKSPACE_MUTATION_TOOL_NAMES = {
+    "write_file",
+    "write_text_file",
+    "create_file",
+    "edit_file",
+    "apply_patch",
+    "delete_file",
+    "move_file",
+    "copy_file",
+    "create_directory",
+    "make_directory",
+    "remove_directory",
+    "git_commit",
+    "git_checkout",
+    "git_reset",
+    "git_apply",
+    "run_formatter",
+}
+
+
+def classify_tool_effect(tool_name: str) -> ToolEffect:
+    """Classify known tool behavior explicitly; registry membership is irrelevant."""
+    name = tool_name.casefold()
+    if name in READ_ONLY_TOOL_NAMES or name in VERIFICATION_TOOL_NAMES:
+        return (
+            ToolEffect.VERIFICATION
+            if name in VERIFICATION_TOOL_NAMES
+            else ToolEffect.READ_ONLY
+        )
+    if name in SOCIAL_PUBLISHING_TOOL_NAMES:
+        return ToolEffect.SOCIAL_PUBLISHING
+    if name in SOCIAL_ACTION_TOOL_NAMES:
+        return ToolEffect.SOCIAL_ACTION
+    if name == "molt_remember":
+        return ToolEffect.MEMORY_WRITE
+    if name in WORKSPACE_MUTATION_TOOL_NAMES:
+        return ToolEffect.WORKSPACE_MUTATION
+    return ToolEffect.OTHER
+
+
 @dataclass
 class AgentLoopConfig:
     max_iterations: int = 100
@@ -70,6 +161,9 @@ class AgentLoopConfig:
     max_subagent_tool_calls: int = DEFAULT_MAX_SUBAGENT_TOOL_CALLS
     max_subagent_task_chars: int = DEFAULT_MAX_SUBAGENT_TASK_CHARS
     max_consecutive_executor_steps: int = 8
+    max_runtime_seconds: int = 1800
+    max_social_actions_per_run: int = 1
+    max_candidate_posts_per_run: int = 5
 
     def __post_init__(self) -> None:
         if self.max_subagents_per_run < 0:
@@ -82,6 +176,12 @@ class AgentLoopConfig:
             raise ValueError("max_subagent_task_chars must be at least 1")
         if self.max_consecutive_executor_steps < 1:
             raise ValueError("max_consecutive_executor_steps must be at least 1")
+        if self.max_runtime_seconds < 1:
+            raise ValueError("max_runtime_seconds must be at least 1")
+        if self.max_social_actions_per_run < 1:
+            raise ValueError("max_social_actions_per_run must be at least 1")
+        if self.max_candidate_posts_per_run < 1:
+            raise ValueError("max_candidate_posts_per_run must be at least 1")
 
 class AgentLoop:
     """
@@ -164,6 +264,8 @@ class AgentLoop:
     def run(
         self,
         task: str,
+        *,
+        initial_read_cache: dict[str, dict[str, Any]] | None = None,
     ) -> AgentState:
         started = time.perf_counter()
         run_id = new_run_id()
@@ -184,7 +286,7 @@ class AgentLoop:
                     task=task,
                 )
             try:
-                state = self._run(task)
+                state = self._run(task, initial_read_cache=initial_read_cache)
             except Exception as exc:
                 log_event(
                     "agent.run.failed",
@@ -242,10 +344,15 @@ class AgentLoop:
     def _run(
         self,
         task: str,
+        *,
+        initial_read_cache: dict[str, dict[str, Any]] | None = None,
     ) -> AgentState:
         state = AgentState(
             task=task
         )
+        state.metadata["moltbook_read_cache"] = dict(initial_read_cache or {})
+        state.metadata["evidence_version"] = 0
+        loop_started = time.monotonic()
 
         # ---------------------------------------------------------
         # INITIAL USER MESSAGE
@@ -287,6 +394,14 @@ class AgentLoop:
         for _ in range(
             self.config.max_iterations
         ):
+            if time.monotonic() - loop_started >= self.config.max_runtime_seconds:
+                limit_error = "Maximum agent cycle runtime reached."
+                state.fail(limit_error)
+                state.final_answer = self._format_partial_summary(
+                    self._format_journal_fallback(read_task_journal()),
+                    limit_error,
+                )
+                return state
             state.next_iteration()
             log_event(
                 "agent.iteration.started",
@@ -434,6 +549,17 @@ class AgentLoop:
                     self._synthesize_final_answer(state)
                     return state
 
+                if (
+                    "last_evaluated_evidence_version" in state.metadata
+                    and state.metadata["last_evaluated_evidence_version"]
+                    == state.metadata.get("evidence_version", 0)
+                ):
+                    # No new tool evidence or action followed the last
+                    # evaluator decision; synthesize once instead of asking
+                    # the Evaluator to repeat the same decision.
+                    self._synthesize_final_answer(state)
+                    return state
+
                 # ---------------------------------
                 # 4. EVALUATION PHASE
                 # ---------------------------------
@@ -520,6 +646,71 @@ class AgentLoop:
 
             for tool_call in response.tool_calls:
 
+                effect = classify_tool_effect(tool_call.tool_name)
+                if tool_call.tool_name == "molt_get_post":
+                    candidate_id = str(tool_call.arguments.get("post_id", "")).strip()
+                    candidate_ids = state.metadata.setdefault("candidate_post_ids", [])
+                    if (
+                        candidate_id
+                        and candidate_id not in candidate_ids
+                        and len(candidate_ids) >= self.config.max_candidate_posts_per_run
+                    ):
+                        execution = ToolExecution(
+                            tool_name=tool_call.tool_name,
+                            arguments=tool_call.arguments,
+                            success=False,
+                            error=(
+                                "policy_rejected: candidate_discussion_limit; "
+                                "this cycle has reached its candidate-post limit."
+                            ),
+                            reason_for_tool=tool_call.reason_for_tool,
+                        )
+                        state.add_tool_execution(execution)
+                        state.metadata["evidence_version"] = state.metadata.get("evidence_version", 0) + 1
+                        self.context.add_tool_message(
+                            state,
+                            content=execution.error,
+                            tool_name=tool_call.tool_name,
+                            tool_call_id=tool_call.call_id,
+                        )
+                        continue
+                    if candidate_id and candidate_id not in candidate_ids:
+                        candidate_ids.append(candidate_id)
+                if effect in {
+                    ToolEffect.SOCIAL_ACTION,
+                    ToolEffect.SOCIAL_PUBLISHING,
+                }:
+                    action_count = int(
+                        state.metadata.get("social_action_attempt_count", 0)
+                    )
+                    if action_count >= self.config.max_social_actions_per_run:
+                        execution = ToolExecution(
+                            tool_name=tool_call.tool_name,
+                            arguments=tool_call.arguments,
+                            success=False,
+                            error=(
+                                "policy_rejected: cycle_social_action_limit; "
+                                "one primary social action is allowed per cycle."
+                            ),
+                            reason_for_tool=tool_call.reason_for_tool,
+                        )
+                        state.add_tool_execution(execution)
+                        last_execution = execution
+                        state.metadata["evidence_version"] = (
+                            state.metadata.get("evidence_version", 0) + 1
+                        )
+                        state.metadata.setdefault(
+                            "social_action_limit_rejections", []
+                        ).append(tool_call.tool_name)
+                        self.context.add_tool_message(
+                            state,
+                            content=execution.error or "Social action limit reached.",
+                            tool_name=tool_call.tool_name,
+                            tool_call_id=tool_call.call_id,
+                        )
+                        continue
+                    state.metadata["social_action_attempt_count"] = action_count + 1
+
                 if state.tool_failure_counts.get(
                     tool_call.tool_name,
                     0,
@@ -562,6 +753,10 @@ class AgentLoop:
                     state,
                     tool_call,
                 )
+                if not state.metadata.pop("last_tool_was_cache_hit", False):
+                    state.metadata["evidence_version"] = (
+                        state.metadata.get("evidence_version", 0) + 1
+                    )
 
                 state.add_tool_execution(
                     execution
@@ -573,6 +768,21 @@ class AgentLoop:
                 # -------------------------------------------------
 
                 if not execution.success:
+
+                    if effect in {
+                        ToolEffect.SOCIAL_ACTION,
+                        ToolEffect.SOCIAL_PUBLISHING,
+                    }:
+                        state.metadata.setdefault("social_actions", []).append(
+                            {
+                                "tool": tool_call.tool_name,
+                                "arguments": tool_call.arguments,
+                                "status": self._social_execution_status(execution)
+                                or "failed",
+                                "result": execution.result,
+                                "error": execution.error,
+                            }
+                        )
 
                     state.tool_failure_counts[
                         tool_call.tool_name
@@ -611,6 +821,25 @@ class AgentLoop:
                         )
                         + f"\ntool_response: {execution.error}"
                     )
+
+                    social_status = self._social_execution_status(execution)
+                    if effect in {
+                        ToolEffect.SOCIAL_ACTION,
+                        ToolEffect.SOCIAL_PUBLISHING,
+                    } and social_status in {
+                        "verification_required",
+                        "unknown",
+                    }:
+                        state.metadata["social_verification_pending"] = (
+                            social_status == "verification_required"
+                        )
+                        state.metadata["social_action_unresolved_status"] = social_status
+                        recovery_message = (
+                            "The Moltbook write has an unresolved platform outcome "
+                            f"({social_status}). Do not repeat it. Report it as "
+                            "unconfirmed unless a Moltbook read establishes the result.\n"
+                            f"tool_response: {execution.error}"
+                        )
 
                     self.context.add_tool_message(
                         state,
@@ -653,13 +882,8 @@ class AgentLoop:
                     execution,
                 )
 
-                registered_tool = self.registry.get(
-                    tool_call.tool_name
-                )
-
-                if (
-                    registered_tool is not None
-                ):
+                effect = classify_tool_effect(tool_call.tool_name)
+                if effect == ToolEffect.WORKSPACE_MUTATION:
                     batch_verification_tools.append(
                         tool_call.tool_name
                     )
@@ -669,8 +893,7 @@ class AgentLoop:
                     if target is not None:
                         batch_verification_targets.append(target)
                 elif (
-                    tool_call.tool_name
-                    in VERIFICATION_TOOL_NAMES
+                    effect == ToolEffect.VERIFICATION
                     and self._verification_result_succeeded(
                         execution
                     )
@@ -683,6 +906,19 @@ class AgentLoop:
                     state.metadata.pop(
                         "verification_targets",
                         None,
+                    )
+                elif effect in {
+                    ToolEffect.SOCIAL_ACTION,
+                    ToolEffect.SOCIAL_PUBLISHING,
+                }:
+                    state.metadata.setdefault("social_actions", []).append(
+                        {
+                            "tool": tool_call.tool_name,
+                            "arguments": tool_call.arguments,
+                            "status": self._social_execution_status(execution)
+                            or "success",
+                            "result": execution.result,
+                        }
                     )
 
                 if (
@@ -710,6 +946,17 @@ class AgentLoop:
                     state.metadata["verification_targets"] = list(
                         dict.fromkeys(batch_verification_targets)
                     )
+
+            if (
+                "last_evaluated_evidence_version" in state.metadata
+                and state.metadata["last_evaluated_evidence_version"]
+                == state.metadata.get("evidence_version", 0)
+            ):
+                # Keep the existing evaluator decision and let the Executor
+                # use the already-known evidence without another model call.
+                state.metadata["continue_executor"] = True
+                state.current_tool_calls = []
+                continue
 
             evaluation = self.evaluator.evaluate(
                 state=state,
@@ -831,6 +1078,14 @@ class AgentLoop:
                 The main loop should continue.
         """
 
+        if state.metadata.get("social_action_unresolved_status") in {
+            "verification_required",
+            "unknown",
+        }:
+            # The MCP boundary has already attempted read-after-write
+            # reconciliation. Never repeat a challenge or uncertain POST.
+            return self._synthesize_final_answer(state)
+
         if state.unresolved_tool_failures:
             failures = "; ".join(
                 f"{name}: {error}"
@@ -902,6 +1157,30 @@ class AgentLoop:
         # runtime state and conversation context.
         # ---------------------------------------------------------
 
+        if evaluation.next_action == NextAction.SOCIAL_ACTION:
+            phase_instruction = (
+                "Enter the SOCIAL_ACTION phase. Continue the original "
+                "Moltbook objective through the Planner and Executor, using "
+                "only the available Moltbook tools. Select at most one "
+                "meaningful social action this cycle; do not repeat an "
+                "uncertain or challenged write."
+            )
+        elif evaluation.next_action == NextAction.MODIFY:
+            phase_instruction = (
+                "Enter the workspace MODIFY phase only if the original task "
+                "requires changing a workspace artifact."
+            )
+        elif evaluation.next_action == NextAction.VERIFY:
+            phase_instruction = (
+                "Enter the VERIFY phase using the available verification "
+                "tools appropriate to the operation."
+            )
+        else:
+            phase_instruction = (
+                "Continue working on the original user task and respect "
+                "the required phase."
+            )
+
         self.context.add_user_message(
             state,
             (
@@ -917,8 +1196,7 @@ class AgentLoop:
                 f"{evaluation.reason}\n\n"
                 f"Required next phase: "
                 f"{evaluation.next_action.value}\n\n"
-                "Continue working on the original user task. "
-                "Respect the required next phase."
+                f"{phase_instruction}"
             ),
         )
 
@@ -1258,6 +1536,23 @@ class AgentLoop:
                     return True
 
         return not self._contains_verification_failure(result)
+
+    @staticmethod
+    def _social_execution_status(execution: ToolExecution) -> str | None:
+        result: Any = execution.result
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except json.JSONDecodeError:
+                return None
+        if not isinstance(result, dict):
+            return None
+        status = result.get("status")
+        if isinstance(status, str):
+            return status.casefold()
+        if result.get("success") is True:
+            return "success"
+        return None
 
     def _contains_verification_failure(
         self,
@@ -1630,6 +1925,7 @@ class AgentLoop:
             arguments=tool_call.arguments,
             reason_for_tool=tool_call.reason_for_tool,
         )
+        state.metadata["last_tool_was_cache_hit"] = False
 
         # ---------------------------------------------------------
         # VERIFY TOOL EXISTS
@@ -1688,6 +1984,35 @@ class AgentLoop:
 
             return execution
 
+        effect = classify_tool_effect(tool_call.tool_name)
+        cache_key = None
+        if tool_call.tool_name.casefold() in CACHEABLE_READ_TOOL_NAMES:
+            cache_arguments = {
+                key: value
+                for key, value in tool_call.arguments.items()
+                if key != "reason_for_tool"
+            }
+            cache_key = json.dumps(
+                [tool_call.tool_name.casefold(), cache_arguments],
+                sort_keys=True,
+                ensure_ascii=False,
+                default=str,
+            )
+            cached = state.metadata.setdefault(
+                "moltbook_read_cache", {}
+            ).get(cache_key)
+            if cached is not None:
+                state.metadata["last_tool_was_cache_hit"] = True
+                execution.result = cached["result"]
+                execution.success = True
+                execution.duration_ms = 0.0
+                log_event(
+                    "agent.tool.cache_hit",
+                    tool_name=tool_call.tool_name,
+                    call_id=tool_call.call_id,
+                )
+                return execution
+
         # ---------------------------------------------------------
         # EXECUTE TOOL
         # ---------------------------------------------------------
@@ -1731,6 +2056,10 @@ class AgentLoop:
                     tool_call.tool_name,
                     None,
                 )
+                if cache_key is not None and effect == ToolEffect.READ_ONLY:
+                    state.metadata["moltbook_read_cache"][cache_key] = {
+                        "result": execution.result,
+                    }
 
         except Exception as exc:
             execution.success = False
@@ -1919,6 +2248,11 @@ class AgentLoop:
         payload: Any,
     ) -> str | None:
         if not isinstance(payload, dict):
+            if isinstance(payload, (list, tuple)):
+                for item in payload:
+                    error = self._tool_payload_error(item)
+                    if error:
+                        return error
             return None
 
         if payload.get("success") is False:
@@ -1938,6 +2272,12 @@ class AgentLoop:
                 payload.get("error")
                 or "Tool execution timed out."
             )
+
+        for value in payload.values():
+            if isinstance(value, (dict, list, tuple)):
+                error = self._tool_payload_error(value)
+                if error:
+                    return error
 
         return None
 
@@ -1998,6 +2338,9 @@ class AgentLoop:
             "next_action":
                 evaluation.next_action.value,
         }
+        state.metadata["last_evaluated_evidence_version"] = state.metadata.get(
+            "evidence_version", 0
+        )
         log_event(
             "agent.evaluation",
             evidence_sufficient=evaluation.evidence_sufficient,

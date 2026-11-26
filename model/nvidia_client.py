@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 
 import requests
+from urllib.parse import urlparse
 
 from .messages import Message, ModelResponse
 from .parser import ModelParser
@@ -137,6 +138,36 @@ class NVIDIAClient:
                 exc_info=True,
             )
             raise
+
+    def health_check(self) -> tuple[bool, str]:
+        """Check that the configured NVIDIA endpoint lists the selected model."""
+        parsed = urlparse(self.base_url)
+        if parsed.scheme != "https" or not parsed.hostname:
+            return False, "nvidia_endpoint_must_use_https"
+        try:
+            response = requests.get(
+                f"{self.base_url}/models",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                timeout=10,
+                allow_redirects=False,
+            )
+            if 300 <= response.status_code < 400:
+                return False, "nvidia_model_endpoint_redirect_rejected"
+            if not response.ok:
+                return False, f"nvidia_model_endpoint_http_{response.status_code}"
+            payload = response.json()
+            model_ids = {
+                str(item.get("id"))
+                for item in payload.get("data", [])
+                if isinstance(item, dict) and item.get("id")
+            } if isinstance(payload, dict) else set()
+            if not model_ids:
+                return False, "nvidia_model_catalog_unavailable"
+            if self.model not in model_ids:
+                return False, "configured_nvidia_model_not_available"
+            return True, "available"
+        except (requests.RequestException, ValueError):
+            return False, "nvidia_model_endpoint_unreachable"
 
     def _normalize_messages(
         self,

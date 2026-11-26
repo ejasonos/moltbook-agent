@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
+from dotenv import load_dotenv
 
 from moltbook.heartbeat import MoltHeartbeat
 from moltbook.runner import MoltRunner
@@ -10,9 +12,11 @@ from utils.logging import configure_logging
 
 
 def main() -> None:
+    project_root = Path(__file__).resolve().parent
+    load_dotenv(project_root / ".env", override=False)
     configure_logging()
 
-    logger = logging.getLogger("molt")
+    logger = logging.getLogger("local_agent.molt")
     runtime = None
     exit_code = 0
 
@@ -32,6 +36,8 @@ def main() -> None:
         heartbeat = MoltHeartbeat(
             callback=runner.run_cycle,
             policy=runtime.policy,
+            memory=runtime.memory,
+            lease_seconds=max(7200, runtime.agent_loop.config.max_runtime_seconds + 600),
         )
 
         heartbeat.run()

@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 from integrations.moltbook.client import MoltbookClient
 
 
@@ -17,7 +19,7 @@ def get_comments(
         params["cursor"] = cursor
 
     return client.get(
-        f"/posts/{post_id}/comments",
+        f"/posts/{quote(post_id, safe='')}/comments",
         params=params,
     )
 
@@ -34,7 +36,7 @@ def create_comment(
         payload["parent_id"] = parent_id
 
     return client.post(
-        f"/posts/{post_id}/comments",
+        f"/posts/{quote(post_id, safe='')}/comments",
         payload,
     )
 

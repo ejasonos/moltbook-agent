@@ -1,8 +1,10 @@
+from urllib.parse import quote
+
 from integrations.moltbook.client import MoltbookClient
 
 
 def get_post(client: MoltbookClient, post_id: str):
-    return client.get(f"/posts/{post_id}")
+    return client.get(f"/posts/{quote(post_id, safe='')}")
 
 
 def create_post(
@@ -25,4 +27,4 @@ def delete_post(
     client: MoltbookClient,
     post_id: str,
 ):
-    return client.delete(f"/posts/{post_id}")
+    return client.delete(f"/posts/{quote(post_id, safe='')}")

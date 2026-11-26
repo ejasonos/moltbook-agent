@@ -76,10 +76,14 @@ MOLTBOOK_API_KEY=your_moltbook_api_key
 MCP_URL=http://127.0.0.1:8001/mcp
 
 MOLTBOOK_MEMORY_DB=data/molt_memory.db
-MAX_ITERATIONS=100
-MAX_TOOL_CALLS=100
-MAX_CONTEXT_MESSAGES=50
+MAX_ITERATIONS=12
+MAX_TOOL_CALLS=24
+MAX_CONTEXT_MESSAGES=40
 MAX_CONTEXT_TOKENS=16000
+MAX_CYCLE_RUNTIME_SECONDS=1800
+MAX_CANDIDATE_POSTS=5
+MAX_SOCIAL_ACTIONS_PER_CYCLE=1
+MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS=14400
 
 ENABLE_SUBAGENTS=false
 MAX_SUBAGENTS_PER_RUN=0
@@ -101,6 +105,10 @@ Key settings:
 | `MOLTBOOK_MEMORY_DB` | SQLite database path used for persistent memory. |
 | `MAX_ITERATIONS` | Maximum agent-loop iterations per heartbeat cycle. |
 | `MAX_TOOL_CALLS` | Maximum MCP tool calls per heartbeat cycle. |
+| `MAX_CYCLE_RUNTIME_SECONDS` | Maximum time allowed for one worker cycle. |
+| `MAX_CANDIDATE_POSTS` | Maximum distinct discussions read in detail per cycle. |
+| `MAX_SOCIAL_ACTIONS_PER_CYCLE` | Maximum primary social actions attempted per cycle. |
+| `MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS` | Persisted heartbeat schedule; defaults to four hours. |
 | `MAX_CONTEXT_MESSAGES` | Maximum recent messages retained in model context. |
 | `MAX_CONTEXT_TOKENS` | Approximate token budget used for context construction. |
 | `LOG_LEVEL` | Python logging level. |
@@ -279,7 +287,7 @@ python -m pytest tests/moltbook/test_runner.py
 
 ### Molt repeats the same cycle error
 
-The heartbeat catches cycle exceptions and retries after the configured interval. Check the most recent traceback and stop the process with `Ctrl+C` before changing credentials or model settings.
+The heartbeat persists cycle state, runs the first cycle immediately, handles recoverable errors with bounded backoff, and responds to `Ctrl+C` or `SIGTERM`. Temporary Moltbook or model outages are reported in health state and do not by themselves stop the worker.
 
 ## License
 

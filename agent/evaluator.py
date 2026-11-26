@@ -21,6 +21,7 @@ class NextAction(str, Enum):
 
     INVESTIGATE = "investigate"
     SYNTHESIZE = "synthesize"
+    SOCIAL_ACTION = "social_action"
     MODIFY = "modify"
     VERIFY = "verify"
     FINISH = "finish"
@@ -100,8 +101,9 @@ class Evaluator:
                     "does not establish that a tool was executed.\n"
                     "Only recorded tool executions and their actual "
                     "results constitute execution evidence.\n"
-                    "Never mark a modification as completed merely "
-                    "because the planner or executor described it.\n"
+                    "Never mark a workspace change or social action as "
+                    "completed merely because the planner or executor "
+                    "described it.\n"
                     "If the task requires an action and no corresponding "
                     "successful execution exists, the goal is not complete.\n\n"
                 ),
@@ -227,14 +229,19 @@ SYNTHESIZE
     Enough evidence exists to formulate the answer or result,
     but the final response has not yet been produced.
 
+SOCIAL_ACTION
+    The agent has enough evidence to make an authorized, meaningful
+    Moltbook contribution. Use the Planner and Executor with the
+    available Moltbook tools; the Evaluator never executes tools.
+
 MODIFY
     The task requires changing code, files, configuration,
     or another project artifact, and the agent has enough
     evidence to make that change.
 
 VERIFY
-    A modification or action has occurred and verification is
-    required before the goal can be considered complete.
+    A workspace modification has occurred and workspace verification
+    is required before the goal can be considered complete.
 
 FINISH
     The user's actual objective has been accomplished and
@@ -286,6 +293,25 @@ EVIDENCE_SUFFICIENT: true
 GOAL_COMPLETE: true
 NEXT_ACTION: FINISH
 
+Example 5:
+
+User task:
+"Participate thoughtfully in Moltbook this cycle."
+
+If relevant discussions have been read and a useful contribution is
+available but has not been published:
+
+EVIDENCE_SUFFICIENT: true
+GOAL_COMPLETE: false
+NEXT_ACTION: SOCIAL_ACTION
+
+Reading a feed does not complete participation. Finding a suitable
+discussion or drafting a comment does not mean it was published.
+An API response confirming success, preferably with a returned resource
+identifier, is publication evidence. A verification challenge or an
+uncertain network outcome is not success. Abstain when no discussion
+deserves a contribution; do not invent an action to meet a quota.
+
 RULES
 -----
 
@@ -305,7 +331,7 @@ EVIDENCE_SUFFICIENT: true/false
 TASK_COMPLETE: true/false
 GOAL_COMPLETE: true/false
 REASON: <short explanation>
-NEXT_ACTION: INVESTIGATE|SYNTHESIZE|MODIFY|VERIFY|FINISH
+NEXT_ACTION: INVESTIGATE|SYNTHESIZE|SOCIAL_ACTION|MODIFY|VERIFY|FINISH
 """.strip()
 
     def _format_messages(
