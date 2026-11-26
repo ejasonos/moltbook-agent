@@ -120,7 +120,7 @@ class AgentSettings:
     nvidia_model: str = field(
         default_factory=lambda: os.getenv(
             "NVIDIA_MODEL",
-            "meta/llama-3.3-70b-instruct",
+            "nvidia/nemotron-3-ultra-550b-a55b",
         )
     )
 
