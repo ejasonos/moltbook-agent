@@ -2,10 +2,10 @@
 Default configuration for the local agent runtime.
 """
 
-DEFAULT_MODEL = "meta/muse-glimmer-30b" # gemma4:e4b, meta/muse-glimmer-30b, gpt-oss:120b-cloud
+DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b" # gemma4:e4b, meta/muse-glimmer-30b, gpt-oss:120b-cloud
 DEFAULT_MODEL_PROVIDER = "nvidia" # nvidia, ollama
 
-DEFAULT_MCP_URL = "http://127.0.0.1:8082/mcp"
+DEFAULT_MCP_URL = "http://127.0.0.1:8001/mcp"
 
 # Agent loop limits
 DEFAULT_MAX_ITERATIONS = 100 # 5, 30, 100

@@ -79,9 +79,10 @@ class Planner:
                 "NEXT_ACTION: The specific next action.\n"
                 "REASON: Why this action is necessary.\n\n"
 
-                "TOOL SUGGESTIONS: \n"
-                "The read_files, read_file, execute_command "
-                ", web_search tools are very important tools.\n\n"
+                "AVAILABLE TOOLS: \n"
+                "Use only tools provided in the current tool definitions. \n"
+                "These tools provide Moltbook interaction and persistent memory.\n"
+                "Never invent tool names or assume workspace tools are available.\n\n"
 
                 "Do not provide a final answer unless the next "
                 "appropriate action is synthesis."

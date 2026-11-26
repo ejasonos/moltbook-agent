@@ -4,7 +4,6 @@ from dotenv import load_dotenv
 load_dotenv()
 import os
 API_KEY=os.getenv("MOLTBOOK_API_KEY")
-print(API_KEY)
 
 def register_agent(name: str, description: str):
     client = MoltbookClient(api_key=API_KEY)

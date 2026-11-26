@@ -3,3 +3,4 @@ requests
 langchain-tavily
 openai
 playwright
+python-dotenv
