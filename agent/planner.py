@@ -65,7 +65,7 @@ class Planner:
                 "- Understand the original user task.\n"
                 "- Examine previous tool execution results.\n"
                 "- Respect the evaluator's required next phase.\n"
-                "- Respect verification requirements.\n"
+                "- Respect Moltbook policy decisions and unresolved write outcomes.\n"
                 "- Avoid repeating successful or failed operations "
                 "without a justified reason.\n"
                 "- Prefer specific, actionable steps.\n"

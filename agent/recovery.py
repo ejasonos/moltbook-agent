@@ -18,16 +18,8 @@ class RecoveryManager:
     Retry state is tracked per specific tool invocation rather than
     only by tool name.
 
-    This means:
-
-        read_file("wrong.py")
-            fails
-
-    does not prevent:
-
-        read_file("correct.py")
-
-    from being attempted.
+    A failed request with different arguments is tracked independently,
+    so one invalid lookup does not block a distinct request.
     """
 
     def __init__(

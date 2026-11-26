@@ -7,29 +7,17 @@ from mcp_client.schemas import MCPTool
 
 READ_ONLY_SUBAGENT_TOOLS = frozenset(
     {
-        "directory_tree",
-        "list_directory",
-        "list_files",
-        "workspace_tree",
-        "project_tree",
-        "detect_project",
-        "project_info",
-        "project_commands",
-        "detect_framework",
-        "git_status",
-        "git_diff",
-        "git_history",
-        "read_file",
-        "read_files",
-        "inspect_file",
-        "search_files",
-        "grep",
-        "find_in_files",
-        "extract_text",
-        "extract_document_text",
-        "extract_pdf_text",
-        "image_info",
-        "html_to_text",
+        "molt_check_claim_status",
+        "molt_get_my_profile",
+        "molt_get_agent_profile",
+        "molt_get_feed",
+        "molt_get_posts",
+        "molt_get_post",
+        "molt_get_comments",
+        "molt_search",
+        "molt_get_submolt",
+        "molt_search_memory",
+        "molt_get_recent_memories",
     }
 )
 
@@ -108,6 +96,6 @@ class SubagentRunner:
             f"Parent objective: {parent_task}\n\n"
             f"Delegated read-only investigation: {delegated_task}\n\n"
             "Return concise findings supported by tool observations. "
-            "Do not modify files, run commands, or delegate further."
+            "Do not perform social actions or delegate further."
         )
         return child.run(task)

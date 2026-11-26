@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import ast
 import json
 import logging
-import re
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -39,30 +37,10 @@ from utils.task_journal import (
 )
 
 
-VERIFICATION_TOOL_NAMES = {
-    "read_file",
-    "directory_tree",
-    "git_diff",
-    "git_status",
-    "run_tests",
-    "run_test_file",
-    "run_linter",
-    "run_formatter_check",
-    "run_typecheck",
-    "run_build",
-    "browser_screenshot",
-    "image_info",
-    "extract_document_text",
-    "extract_pdf_text",
-}
-
-
 class ToolEffect(str, Enum):
     READ_ONLY = "read_only"
     SOCIAL_ACTION = "social_action"
     SOCIAL_PUBLISHING = "social_publishing"
-    WORKSPACE_MUTATION = "workspace_mutation"
-    VERIFICATION = "verification"
     MEMORY_WRITE = "memory_write"
     OTHER = "other"
 
@@ -107,43 +85,18 @@ SOCIAL_ACTION_TOOL_NAMES = {
     "molt_subscribe_submolt",
 }
 
-WORKSPACE_MUTATION_TOOL_NAMES = {
-    "write_file",
-    "write_text_file",
-    "create_file",
-    "edit_file",
-    "apply_patch",
-    "delete_file",
-    "move_file",
-    "copy_file",
-    "create_directory",
-    "make_directory",
-    "remove_directory",
-    "git_commit",
-    "git_checkout",
-    "git_reset",
-    "git_apply",
-    "run_formatter",
-}
-
 
 def classify_tool_effect(tool_name: str) -> ToolEffect:
     """Classify known tool behavior explicitly; registry membership is irrelevant."""
     name = tool_name.casefold()
-    if name in READ_ONLY_TOOL_NAMES or name in VERIFICATION_TOOL_NAMES:
-        return (
-            ToolEffect.VERIFICATION
-            if name in VERIFICATION_TOOL_NAMES
-            else ToolEffect.READ_ONLY
-        )
+    if name in READ_ONLY_TOOL_NAMES:
+        return ToolEffect.READ_ONLY
     if name in SOCIAL_PUBLISHING_TOOL_NAMES:
         return ToolEffect.SOCIAL_PUBLISHING
     if name in SOCIAL_ACTION_TOOL_NAMES:
         return ToolEffect.SOCIAL_ACTION
     if name == "molt_remember":
         return ToolEffect.MEMORY_WRITE
-    if name in WORKSPACE_MUTATION_TOOL_NAMES:
-        return ToolEffect.WORKSPACE_MUTATION
     return ToolEffect.OTHER
 
 
@@ -206,8 +159,7 @@ class AgentLoop:
          │       ├────────────────┤
          └──────→│ INVESTIGATE    │
                  │ SYNTHESIZE     │
-                 │ MODIFY         │
-                 │ VERIFY         │
+                 │ SOCIAL_ACTION  │
                  │ FINISH         │
                  └────────────────┘
     """
@@ -640,8 +592,6 @@ class AgentLoop:
             # EXECUTE TOOL CALLS
             # -----------------------------------------------------
 
-            batch_verification_tools: list[str] = []
-            batch_verification_targets: list[str] = []
             last_execution: ToolExecution | None = None
 
             for tool_call in response.tool_calls:
@@ -872,42 +822,8 @@ class AgentLoop:
                     tool_call_id=tool_call.call_id,
                 )
 
-                # -------------------------------------------------
-                # UPDATE AGENT KNOWLEDGE
-                # -------------------------------------------------
-
-                self._update_knowledge_state(
-                    state,
-                    tool_call,
-                    execution,
-                )
-
                 effect = classify_tool_effect(tool_call.tool_name)
-                if effect == ToolEffect.WORKSPACE_MUTATION:
-                    batch_verification_tools.append(
-                        tool_call.tool_name
-                    )
-                    target = self._extract_path_argument(
-                        tool_call.arguments
-                    )
-                    if target is not None:
-                        batch_verification_targets.append(target)
-                elif (
-                    effect == ToolEffect.VERIFICATION
-                    and self._verification_result_succeeded(
-                        execution
-                    )
-                ):
-                    state.verification_pending = False
-                    state.metadata.pop(
-                        "verification_required_by",
-                        None,
-                    )
-                    state.metadata.pop(
-                        "verification_targets",
-                        None,
-                    )
-                elif effect in {
+                if effect in {
                     ToolEffect.SOCIAL_ACTION,
                     ToolEffect.SOCIAL_PUBLISHING,
                 }:
@@ -919,32 +835,6 @@ class AgentLoop:
                             or "success",
                             "result": execution.result,
                         }
-                    )
-
-                if (
-                    not state.unresolved_tool_failures
-                    and not state.verification_pending
-                    and len(response.tool_calls) == 1
-                    and self._is_direct_delete_request(
-                        state.task,
-                        execution,
-                    )
-                ):
-                    deleted_path = execution.arguments["path"]
-                    state.finish(
-                        f"Deleted {deleted_path}."
-                    )
-                    self._synthesize_final_answer(state)
-                    return state
-
-            if batch_verification_tools:
-                state.verification_pending = True
-                state.metadata["verification_required_by"] = ", ".join(
-                    dict.fromkeys(batch_verification_tools)
-                )
-                if batch_verification_targets:
-                    state.metadata["verification_targets"] = list(
-                        dict.fromkeys(batch_verification_targets)
                     )
 
             if (
@@ -993,73 +883,6 @@ class AgentLoop:
     # EVALUATION CONTROL
     # =============================================================
 
-    @staticmethod
-    def _is_direct_delete_request(
-        task: str,
-        execution: ToolExecution,
-    ) -> bool:
-        if (
-            execution.tool_name != "delete_file"
-            or not execution.success
-        ):
-            return False
-
-        path = execution.arguments.get("path")
-        if not isinstance(path, str) or not path.strip():
-            return False
-
-        task_words = re.findall(r"[a-z0-9]+", task.lower())
-        target_words = re.findall(
-            r"[a-z0-9]+",
-            path.replace("\\", "/").split("/")[-1].lower(),
-        )
-        if not target_words or not any(
-            task_words[index:index + len(target_words)] == target_words
-            for index in range(
-                len(task_words) - len(target_words) + 1
-            )
-        ):
-            return False
-
-        delete_verbs = {"delete", "remove", "erase", "unlink"}
-        if sum(word in delete_verbs for word in task_words) != 1:
-            return False
-
-        if any(
-            word in {
-                "and",
-                "also",
-                "then",
-                "after",
-                "before",
-                "while",
-                "but",
-                "not",
-                "never",
-                "create",
-                "write",
-                "edit",
-                "modify",
-                "update",
-                "rename",
-                "move",
-                "copy",
-                "verify",
-                "check",
-                "run",
-                "test",
-                "build",
-                "inspect",
-                "read",
-                "search",
-                "explain",
-            }
-            for word in task_words
-        ):
-            return False
-
-        return True
-
     def _handle_evaluation(
         self,
         state: AgentState,
@@ -1105,22 +928,6 @@ class AgentLoop:
             )
             return False
 
-        if state.verification_pending:
-            mutation = state.metadata.get(
-                "verification_required_by",
-                "the previous mutation",
-            )
-            self.context.add_user_message(
-                state,
-                (
-                    f"Verification is still required after "
-                    f"{mutation}. Use a suitable verification "
-                    "tool and do not finish or make another "
-                    "mutation until it succeeds."
-                ),
-            )
-            return False
-
         # ---------------------------------------------------------
         # FINISH
         # ---------------------------------------------------------
@@ -1150,11 +957,10 @@ class AgentLoop:
             )
 
         # ---------------------------------------------------------
-        # INVESTIGATE / MODIFY / VERIFY
+        # INVESTIGATE / SOCIAL_ACTION
         #
-        # These remain active execution phases. The next planner
-        # iteration will receive the evaluator decision through
-        # runtime state and conversation context.
+        # The next planner iteration receives the evaluator decision
+        # through runtime state and conversation context.
         # ---------------------------------------------------------
 
         if evaluation.next_action == NextAction.SOCIAL_ACTION:
@@ -1164,16 +970,6 @@ class AgentLoop:
                 "only the available Moltbook tools. Select at most one "
                 "meaningful social action this cycle; do not repeat an "
                 "uncertain or challenged write."
-            )
-        elif evaluation.next_action == NextAction.MODIFY:
-            phase_instruction = (
-                "Enter the workspace MODIFY phase only if the original task "
-                "requires changing a workspace artifact."
-            )
-        elif evaluation.next_action == NextAction.VERIFY:
-            phase_instruction = (
-                "Enter the VERIFY phase using the available verification "
-                "tools appropriate to the operation."
             )
         else:
             phase_instruction = (
@@ -1467,8 +1263,6 @@ class AgentLoop:
     ) -> str | None:
         if not self.config.enable_subagents:
             return "Subagents are disabled for this run."
-        if state.verification_pending:
-            return "Complete required mutation verification before delegating."
         if len(state.current_tool_calls) > 1:
             return "Delegate one task per tool-call turn; do not batch delegation."
 
@@ -1497,7 +1291,7 @@ class AgentLoop:
                 "description": (
                     "Delegate one independent, read-only investigation to a "
                     "bounded child agent. The parent retains control of "
-                    "mutations, verification, and final completion."
+                    "social actions and final completion."
                 ),
                 "parameters": {
                     "type": "object",
@@ -1517,25 +1311,6 @@ class AgentLoop:
             },
         }
 
-    def _verification_result_succeeded(
-        self,
-        execution: ToolExecution,
-    ) -> bool:
-        if not execution.success:
-            return False
-
-        result: Any = execution.result
-
-        if isinstance(result, str):
-            try:
-                result = json.loads(result)
-            except json.JSONDecodeError:
-                try:
-                    result = ast.literal_eval(result)
-                except (ValueError, SyntaxError):
-                    return True
-
-        return not self._contains_verification_failure(result)
 
     @staticmethod
     def _social_execution_status(execution: ToolExecution) -> str | None:
@@ -1553,363 +1328,6 @@ class AgentLoop:
         if result.get("success") is True:
             return "success"
         return None
-
-    def _contains_verification_failure(
-        self,
-        result: Any,
-    ) -> bool:
-        if isinstance(result, dict):
-            if result.get("success") is False:
-                return True
-
-            if result.get("timed_out") is True:
-                return True
-
-            return any(
-                self._contains_verification_failure(value)
-                for value in result.values()
-                if isinstance(value, (dict, list, tuple))
-            )
-
-        if isinstance(result, (list, tuple)):
-            return any(
-                self._contains_verification_failure(value)
-                for value in result
-            )
-
-        return False
-
-    def _discover_workspace(
-        self,
-        state: AgentState,
-    ) -> bool:
-        """
-        Establish workspace knowledge through the registered
-        directory discovery tool.
-        """
-
-        discovery_tool = (
-            self._find_discovery_tool()
-        )
-
-        if discovery_tool is None:
-            return False
-
-        discovery_call = ToolCall(
-            tool_name=discovery_tool.name,
-            arguments={
-                "path": "./",
-                "max_depth": 4,
-            },
-            reason_for_tool=(
-                "Discover workspace structure."
-            ),
-        )
-
-        execution = self._execute_tool(
-            state,
-            discovery_call,
-        )
-
-        state.add_tool_execution(
-            execution
-        )
-
-        if not execution.success:
-            state.record_failed_tool_call(
-                discovery_call.tool_name,
-                discovery_call.arguments,
-            )
-
-            state.add_message(
-                Message(
-                    role="system",
-                    content=(
-                        f"Workspace discovery failed using "
-                        f"{discovery_call.tool_name}: "
-                        f"{execution.error or 'Unknown error.'}"
-                    ),
-                )
-            )
-
-            return False
-
-        state.add_message(
-            Message(
-                role="system",
-                content=(
-                    f"Workspace discovery using "
-                    f"{discovery_call.tool_name} returned:\n"
-                    f"{execution.result}"
-                ),
-            )
-        )
-
-        state.mark_workspace_discovered()
-
-        self._extract_discovered_paths(
-            state,
-            execution.result,
-        )
-
-        return True
-
-    def _find_discovery_tool(self):
-        """
-        Find the registered workspace discovery tool.
-        """
-
-        preferred_names = (
-            "directory_tree",
-            "workspace_tree",
-            "project_tree",
-            "list_directory",
-            "list_files",
-        )
-
-        for name in preferred_names:
-            tool = self.registry.get(
-                name
-            )
-
-            if tool is not None:
-                return tool
-
-        return None
-
-    # =============================================================
-    # KNOWLEDGE UPDATES
-    # =============================================================
-
-    def _update_knowledge_state(
-        self,
-        state: AgentState,
-        tool_call: ToolCall,
-        execution: ToolExecution,
-    ) -> None:
-        """
-        Update semantic agent knowledge after successful execution.
-        """
-
-        if not execution.success:
-            return
-
-        tool_name = (
-            tool_call.tool_name.lower()
-        )
-
-        # ---------------------------------------------------------
-        # WORKSPACE DISCOVERY
-        # ---------------------------------------------------------
-
-        if tool_name in {
-            "directory_tree",
-            "workspace_tree",
-            "project_tree",
-            "list_directory",
-            "list_files",
-        }:
-            state.mark_workspace_discovered()
-
-            self._extract_discovered_paths(
-                state,
-                execution.result,
-            )
-
-        # ---------------------------------------------------------
-        # FILE INSPECTION
-        # ---------------------------------------------------------
-
-        if tool_name in {
-            "read_file",
-            "inspect_file",
-        }:
-            path = self._knowledge_path(
-                self._extract_path_argument(
-                    tool_call.arguments
-                )
-            )
-
-            if path:
-                state.mark_path_discovered(
-                    path
-                )
-
-                state.mark_file_inspected(
-                    path
-                )
-
-        # ---------------------------------------------------------
-        # SEARCH
-        # ---------------------------------------------------------
-
-        if tool_name in {
-            "search_files",
-            "grep",
-            "find_in_files",
-        }:
-            self._extract_discovered_paths(
-                state,
-                execution.result,
-            )
-
-    def _extract_path_argument(
-        self,
-        arguments: dict[str, Any],
-    ) -> str | None:
-        """
-        Extract a likely file/path argument from a tool call.
-        """
-
-        for key in (
-            "path",
-            "file_path",
-            "filepath",
-            "file",
-            "filename",
-            "target",
-            "source_path",
-            "output_path",
-        ):
-            value = arguments.get(
-                key
-            )
-
-            if isinstance(
-                value,
-                str,
-            ) and value.strip():
-                return value.strip()
-
-        return None
-
-    def _knowledge_path(
-        self,
-        path: str | None,
-    ) -> str | None:
-        if path is None:
-            return None
-
-        try:
-            return str(
-                self.workspace.resolve(path)
-            )
-        except (OSError, ValueError):
-            return path
-
-    def _new_target_does_not_need_inspection(
-        self,
-        prerequisite: str,
-        arguments: dict[str, Any],
-    ) -> bool:
-
-        path = self._extract_path_argument(arguments)
-
-        if path is None:
-            return False
-
-        try:
-            return not self.workspace.resolve(path).exists()
-        except (OSError, ValueError):
-            return False
-
-    def _extract_discovered_paths(
-        self,
-        state: AgentState,
-        result: Any,
-    ) -> None:
-        """
-        Extract obvious path-like lines from discovery/search output.
-        """
-
-        if result is None:
-            return
-
-        if isinstance(result, dict):
-            for key in ("path", "file", "filename"):
-                value = result.get(key)
-                if isinstance(value, str) and value.strip():
-                    state.mark_path_discovered(
-                        self._knowledge_path(value.strip())
-                        or value.strip()
-                    )
-            for value in result.values():
-                if isinstance(value, (dict, list)):
-                    self._extract_discovered_paths(
-                        state,
-                        value,
-                    )
-            return
-
-        if isinstance(result, list):
-            for value in result:
-                self._extract_discovered_paths(
-                    state,
-                    value,
-                )
-            return
-
-        text = str(result)
-        tree_parts: list[str] = []
-
-        for raw_line in text.splitlines():
-            line = raw_line.strip()
-
-            if not line:
-                continue
-
-            cleaned = (
-                line
-                .replace("├──", "")
-                .replace("└──", "")
-                .replace("│", "")
-                .replace("├─", "")
-                .replace("└─", "")
-                .replace("─", "")
-                .strip()
-            )
-
-            if not cleaned:
-                continue
-
-            connector_index = max(
-                raw_line.find("├──"),
-                raw_line.find("└──"),
-            )
-
-            if connector_index >= 0:
-                prefix = raw_line[:connector_index]
-                depth = len(prefix) // 4
-                name = raw_line[connector_index + 4:].strip()
-
-                while len(tree_parts) > depth:
-                    tree_parts.pop()
-
-                tree_parts.append(name)
-                discovered_path = self._knowledge_path(
-                    "/".join(tree_parts)
-                )
-                if discovered_path:
-                    state.mark_path_discovered(
-                        discovered_path
-                    )
-                continue
-
-            if cleaned.endswith("/"):
-                discovered_path = self._knowledge_path(cleaned)
-                if discovered_path:
-                    state.mark_path_discovered(discovered_path)
-                continue
-
-            if (
-                "." in cleaned
-                or "/" in cleaned
-                or "\\" in cleaned
-            ):
-                discovered_path = self._knowledge_path(cleaned)
-                if discovered_path:
-                    state.mark_path_discovered(discovered_path)
-
     # =============================================================
     # TOOL EXECUTION
     # =============================================================
@@ -1928,7 +1346,7 @@ class AgentLoop:
         state.metadata["last_tool_was_cache_hit"] = False
 
         # ---------------------------------------------------------
-        # VERIFY TOOL EXISTS
+        # ENSURE TOOL IS AVAILABLE
         # ---------------------------------------------------------
 
         tool = self.registry.get(

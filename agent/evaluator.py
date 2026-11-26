@@ -22,8 +22,6 @@ class NextAction(str, Enum):
     INVESTIGATE = "investigate"
     SYNTHESIZE = "synthesize"
     SOCIAL_ACTION = "social_action"
-    MODIFY = "modify"
-    VERIFY = "verify"
     FINISH = "finish"
 
 
@@ -101,9 +99,8 @@ class Evaluator:
                     "does not establish that a tool was executed.\n"
                     "Only recorded tool executions and their actual "
                     "results constitute execution evidence.\n"
-                    "Never mark a workspace change or social action as "
-                    "completed merely because the planner or executor "
-                    "described it.\n"
+                    "Never mark a social action as completed merely "
+                    "because the planner or executor described it.\n"
                     "If the task requires an action and no corresponding "
                     "successful execution exists, the goal is not complete.\n\n"
                 ),
@@ -210,10 +207,8 @@ Evidence is sufficient when:
 
 Evidence is insufficient when:
 
-- Important information required by the user's request
-  is still unknown.
-- The wrong target was inspected.
-- A required component has not been inspected.
+- Important information required by the user's request is still unknown.
+- The relevant discussion or author has not been inspected.
 - The current evidence is ambiguous, contradictory, or incomplete.
 - Further investigation is materially necessary.
 
@@ -234,15 +229,6 @@ SOCIAL_ACTION
     Moltbook contribution. Use the Planner and Executor with the
     available Moltbook tools; the Evaluator never executes tools.
 
-MODIFY
-    The task requires changing code, files, configuration,
-    or another project artifact, and the agent has enough
-    evidence to make that change.
-
-VERIFY
-    A workspace modification has occurred and workspace verification
-    is required before the goal can be considered complete.
-
 FINISH
     The user's actual objective has been accomplished and
     no meaningful work remains.
@@ -253,47 +239,15 @@ IMPORTANT EXAMPLES
 Example 1:
 
 User task:
-"What does ToolRegistry do?"
+"Summarize the main topics in the current feed."
 
-If the agent has located and inspected the implementation
-of ToolRegistry and the implementation contains enough
-information to explain its responsibilities:
-
-EVIDENCE_SUFFICIENT: true
-GOAL_COMPLETE: false
-NEXT_ACTION: SYNTHESIZE
-
-The agent should NOT perform another redundant inspection.
-
-Example 2:
-
-User task:
-"Fix the bug in registry.py."
-
-If the relevant code has been inspected and the cause
-has been identified:
-
-EVIDENCE_SUFFICIENT: true
-GOAL_COMPLETE: false
-NEXT_ACTION: MODIFY
-
-Example 3:
-
-After the modification has been made:
-
-EVIDENCE_SUFFICIENT: true
-GOAL_COMPLETE: false
-NEXT_ACTION: VERIFY
-
-Example 4:
-
-After verification confirms the requested change works:
+If the feed has been read and contains enough relevant information:
 
 EVIDENCE_SUFFICIENT: true
 GOAL_COMPLETE: true
-NEXT_ACTION: FINISH
+NEXT_ACTION: SYNTHESIZE
 
-Example 5:
+Example 2:
 
 User task:
 "Participate thoughtfully in Moltbook this cycle."
@@ -317,9 +271,8 @@ RULES
 
 - Do not invent work that has not happened.
 - Do not select INVESTIGATE when the required evidence already exists.
-- Do not select MODIFY for an informational question.
-- Do not select VERIFY before a meaningful modification or action
-  that requires verification.
+- Use only the tools provided in the current tool definitions.
+- Never invent a tool name or call a function that is not available.
 - Do not select FINISH merely because a tool succeeded.
 - If the user's objective has not been accomplished, do not select
   FINISH.
@@ -331,7 +284,7 @@ EVIDENCE_SUFFICIENT: true/false
 TASK_COMPLETE: true/false
 GOAL_COMPLETE: true/false
 REASON: <short explanation>
-NEXT_ACTION: INVESTIGATE|SYNTHESIZE|SOCIAL_ACTION|MODIFY|VERIFY|FINISH
+NEXT_ACTION: INVESTIGATE|SYNTHESIZE|SOCIAL_ACTION|FINISH
 """.strip()
 
     def _format_messages(

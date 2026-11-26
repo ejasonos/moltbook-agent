@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import os
 from typing import Any
 
 from model.messages import Message, ToolCall
@@ -24,13 +23,7 @@ class AgentState:
     """
     Runtime state for a single agent task.
 
-    AgentState stores both execution history and the knowledge
-    the agent has acquired about the workspace.
-
-    Knowledge state is intentionally semantic rather than tied
-    to specific tools. For example, the agent records that the
-    workspace has been discovered, not merely that
-    `directory_tree` was executed.
+    AgentState stores execution history and evidence for one task.
     """
 
     task: str
@@ -65,28 +58,12 @@ class AgentState:
 
     completed: bool = False
 
-    verification_pending: bool = False
-
     final_answer: str | None = None
 
     error: str | None = None
 
     metadata: dict[str, Any] = field(
         default_factory=dict
-    )
-
-    # -------------------------------------------------------------
-    # WORKSPACE KNOWLEDGE
-    # -------------------------------------------------------------
-
-    workspace_discovered: bool = False
-
-    discovered_paths: set[str] = field(
-        default_factory=set
-    )
-
-    inspected_files: set[str] = field(
-        default_factory=set
     )
 
     # -------------------------------------------------------------
@@ -185,54 +162,6 @@ class AgentState:
     def fail(self, error: str) -> None:
         self.completed = True
         self.error = error
-
-    # -------------------------------------------------------------
-    # KNOWLEDGE STATE
-    # -------------------------------------------------------------
-
-    def mark_workspace_discovered(
-        self,
-        paths: list[str] | None = None,
-    ) -> None:
-        """
-        Record that the workspace structure has been discovered.
-        """
-
-        self.workspace_discovered = True
-
-        if paths:
-            for path in paths:
-                self.mark_path_discovered(path)
-
-    def mark_path_discovered(
-        self,
-        path: str,
-    ) -> None:
-        """
-        Record that a specific path is known to exist.
-        """
-
-        self.discovered_paths.add(
-            self._normalize_path(path)
-        )
-
-    def mark_file_inspected(
-        self,
-        path: str,
-    ) -> None:
-        """
-        Record that a file has been inspected.
-        """
-
-        self.inspected_files.add(
-            self._normalize_path(path)
-        )
-
-    @staticmethod
-    def _normalize_path(path: str) -> str:
-        return os.path.normcase(
-            os.path.normpath(path)
-        )
 
     # -------------------------------------------------------------
     # FAILED CALL TRACKING

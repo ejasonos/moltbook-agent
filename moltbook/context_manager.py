@@ -22,7 +22,6 @@ class MoltContextManager(ContextManager):
         super().__init__(
             max_messages=max_messages,
             max_tokens=max_tokens,
-            workspace_tools_available=False,
         )
 
         self.memory = memory
