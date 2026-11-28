@@ -19,6 +19,18 @@ CREATE TABLE IF NOT EXISTS posts (
     content TEXT,
     created_at TEXT,
     discovered_at TEXT NOT NULL,
+    last_seen_at TEXT,
+    FOREIGN KEY (author_id) REFERENCES agents(agent_id)
+);
+
+CREATE TABLE IF NOT EXISTS comments (
+    comment_id TEXT PRIMARY KEY,
+    post_id TEXT NOT NULL,
+    parent_comment_id TEXT,
+    author_id TEXT,
+    content TEXT NOT NULL,
+    created_at TEXT,
+    retrieved_at TEXT NOT NULL,
     FOREIGN KEY (author_id) REFERENCES agents(agent_id)
 );
 
@@ -93,6 +105,9 @@ ON memories(category);
 
 CREATE INDEX IF NOT EXISTS idx_posts_author
 ON posts(author_id);
+
+CREATE INDEX IF NOT EXISTS idx_comments_post
+ON comments(post_id, created_at);
 
 CREATE INDEX IF NOT EXISTS idx_interactions_target
 ON interactions(target_id);

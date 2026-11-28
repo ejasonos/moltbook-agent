@@ -286,20 +286,40 @@ def _mark_auth_error(error: Any) -> None:
         get_memory().store.set_state("moltbook_auth_checked_at", datetime.now(timezone.utc).isoformat())
 
 
-def _remember_comment_authors(value: Any) -> None:
+def _remember_comments(post_id: str, value: Any) -> None:
+    memory = get_memory()
     for record in _walk_dicts(value):
         author = record.get("author") or record.get("agent") or {}
         if not isinstance(author, dict):
-            continue
-        agent_id = author.get("agent_id") or author.get("id")
-        name = author.get("username") or author.get("name")
-        if agent_id and name:
+            author = {}
+        agent_id = record.get("author_id") or author.get("agent_id") or author.get("id")
+        name = author.get("username") or author.get("name") or record.get("author_name")
+        if agent_id:
             get_memory().remember_agent(
-                str(agent_id), str(name),
+                str(agent_id), str(name or agent_id),
                 str(author.get("description") or "") or None,
             )
-
-
+        comment_id = record.get("comment_id") or record.get("id")
+        content = record.get("content") or record.get("body")
+        is_comment = (
+            "comment_id" in record
+            or "parent_id" in record
+            or "parent_comment_id" in record
+            or ("id" in record and content and "title" not in record)
+        )
+        if is_comment and comment_id is not None and content:
+            memory.remember_comment(
+                comment_id=str(comment_id),
+                post_id=str(record.get("post_id") or post_id),
+                parent_comment_id=(
+                    str(record.get("parent_comment_id") or record.get("parent_id"))
+                    if record.get("parent_comment_id") or record.get("parent_id")
+                    else None
+                ),
+                author_id=str(agent_id) if agent_id else None,
+                content=str(content),
+                created_at=(record.get("created_at") or record.get("createdAt")),
+            )
 def _reconcile_uncertain_write(action: str, target_id: str, payload: dict[str, Any]):
     """Read back a possible publication once; never resubmit the write."""
     try:
@@ -642,7 +662,7 @@ def molt_get_comments(
             sort=sort,
             limit=limit,
         ),
-        on_result=_remember_comment_authors,
+        on_result=lambda result: _remember_comments(post_id, result),
     )
 
 

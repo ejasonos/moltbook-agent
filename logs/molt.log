@@ -1666,3 +1666,105 @@ Starting Moltbook activity cycle | cycle_id=6f59d0cced9f45cbab105ebdd4e28c14
 {"timestamp": "2026-11-26T23:14:29.103+00:00", "event": "agent.run.finished", "run_id": "e913f9144ebc44f98ba40eb1d9ca43df", "completed": true, "iteration": 2, "tool_execution_count": 1, "subagent_tool_execution_count": 0, "subagent_count": 0, "unresolved_failure_count": 0, "has_error": false, "run_duration_ms": 55128.81, "model_call_count": 5, "model_usage": {"prompt_tokens": "[REDACTED]", "completion_tokens": "[REDACTED]", "total_tokens": "[REDACTED]"}, "model_duration_ms": 52762.7, "estimated_model_cost_usd": null, "tool_duration_ms": 1788.3}
 Moltbook cycle completed | cycle_id=6f59d0cced9f45cbab105ebdd4e28c14 | auth=authenticated | inspected=5 | evaluated=0 | action=None | action_attempted=False | success=False | model_calls=5 | tokens=25140 | duration_ms=77332.31000000001 | estimated_cost_usd=None
 Next heartbeat scheduled | delay_seconds=14400 | consecutive_failures=1 | error=Cycle completed with unresolved work.
+Moltbook write action failed | action=create_comment | status=failed | error_type=MoltbookAPIError | http_status=400
+Moltbook write action failed | action=create_comment | status=unknown | error_type=MoltbookAPIError | http_status=None
+Moltbook write action failed | action=create_comment | status=failed | error_type=MoltbookAPIError | http_status=400
+Moltbook write action failed | action=create_comment | status=unknown | error_type=MoltbookAPIError | http_status=None
+Penelope_360 heartbeat started | interval_seconds=14400
+Penelope_360 heartbeat stopping.
+Next heartbeat scheduled | delay_seconds=5 | consecutive_failures=1 | error=uncertain_action: write uncertain
+Penelope_360 heartbeat stopped.
+Resuming failed cycle with short retry | delay_seconds=4
+Could not persist heartbeat state | state_key=last_cycle_start
+Could not persist heartbeat state | state_key=cycle_status
+Could not persist heartbeat cycle outcome.
+Traceback (most recent call last):
+  File "C:\Users\Ejakpevweoghene\Documents\Github\Ejakpevweoghene Projects\moltbook-agent\moltbook\heartbeat.py", line 148, in _run_cycle
+    self.memory.store.record_heartbeat_outcome(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        success=success,
+        ^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+        error=error,
+        ^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\Ejakpevweoghene\Documents\Github\Ejakpevweoghene Projects\moltbook-agent\memory\store.py", line 362, in record_heartbeat_outcome
+    with self.db.transaction() as connection:
+         ~~~~~~~~~~~~~~~~~~~^^
+  File "C:\ProgramData\anaconda3\Lib\contextlib.py", line 141, in __enter__
+    return next(self.gen)
+  File "C:\Users\Ejakpevweoghene\Documents\Github\Ejakpevweoghene Projects\moltbook-agent\memory\database.py", line 143, in transaction
+    self.connection.execute("BEGIN IMMEDIATE")
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+sqlite3.ProgrammingError: Cannot operate on a closed database.
+Starting Moltbook activity cycle | cycle_id=f7b9f21606494f5589480a7a36a31a55
+{"timestamp": "2026-11-27T12:07:31.593+00:00", "event": "cycle.started", "run_id": "f7b9f21606494f5589480a7a36a31a55", "phase": "authentication"}
+authentication.succeeded | cycle_id=f7b9f21606494f5589480a7a36a31a55 | phase=preflight
+{"timestamp": "2026-11-27T12:07:31.598+00:00", "event": "authentication.succeeded", "run_id": "f7b9f21606494f5589480a7a36a31a55", "phase": "preflight", "status": "authenticated"}
+{"timestamp": "2026-11-27T12:07:31.601+00:00", "event": "feed.retrieval.started", "run_id": "f7b9f21606494f5589480a7a36a31a55", "phase": "discovery"}
+{"timestamp": "2026-11-27T12:07:31.625+00:00", "event": "feed.retrieval.completed", "run_id": "f7b9f21606494f5589480a7a36a31a55", "phase": "discovery", "tool_name": "molt_get_feed", "status": "success", "duration_ms": null}
+{"timestamp": "2026-11-27T12:07:31.628+00:00", "event": "candidate.selected", "run_id": "f7b9f21606494f5589480a7a36a31a55", "phase": "investigation", "candidate_index": 1}
+{"timestamp": "2026-11-27T12:07:31.631+00:00", "event": "post.retrieval.completed", "run_id": "f7b9f21606494f5589480a7a36a31a55", "phase": "investigation", "tool_name": "molt_get_post", "status": "success", "duration_ms": null}
+{"timestamp": "2026-11-27T12:07:31.635+00:00", "event": "comments.retrieval.completed", "run_id": "f7b9f21606494f5589480a7a36a31a55", "phase": "investigation", "tool_name": "molt_get_comments", "status": "success", "duration_ms": null}
+{"timestamp": "2026-11-27T12:07:31.638+00:00", "event": "evaluation.completed", "run_id": "f7b9f21606494f5589480a7a36a31a55", "phase": "evaluation", "next_action": "synthesize", "goal_complete": true}
+{"timestamp": "2026-11-27T12:07:31.645+00:00", "event": "memory.persistence.completed", "run_id": "f7b9f21606494f5589480a7a36a31a55", "phase": "persistence"}
+memory.persistence.completed | cycle_id=f7b9f21606494f5589480a7a36a31a55
+{"timestamp": "2026-11-27T12:07:31.648+00:00", "event": "cycle.completed", "run_id": "f7b9f21606494f5589480a7a36a31a55", "phase": "complete", "outcome": "abstained", "action_status": "abstained", "duration_ms": 49.303}
+Moltbook cycle completed | cycle_id=f7b9f21606494f5589480a7a36a31a55 | auth=authenticated | inspected=1 | evaluated=1 | action=abstain | action_status=abstained | action_attempted=False | action_succeeded=False | success=True | model_calls=0 | tokens=0 | duration_ms=49.303 | estimated_cost_usd=None
+Starting Moltbook activity cycle | cycle_id=a1448d250085495999162461bb781e0c
+{"timestamp": "2026-11-27T12:07:31.776+00:00", "event": "cycle.started", "run_id": "a1448d250085495999162461bb781e0c", "phase": "authentication"}
+authentication.succeeded | cycle_id=a1448d250085495999162461bb781e0c | phase=preflight
+{"timestamp": "2026-11-27T12:07:31.780+00:00", "event": "authentication.succeeded", "run_id": "a1448d250085495999162461bb781e0c", "phase": "preflight", "status": "authenticated"}
+{"timestamp": "2026-11-27T12:07:31.783+00:00", "event": "feed.retrieval.started", "run_id": "a1448d250085495999162461bb781e0c", "phase": "discovery"}
+{"timestamp": "2026-11-27T12:07:31.829+00:00", "event": "feed.retrieval.completed", "run_id": "a1448d250085495999162461bb781e0c", "phase": "discovery", "tool_name": "molt_get_feed", "status": "success", "duration_ms": null}
+{"timestamp": "2026-11-27T12:07:31.832+00:00", "event": "candidate.selected", "run_id": "a1448d250085495999162461bb781e0c", "phase": "investigation", "candidate_index": 1}
+{"timestamp": "2026-11-27T12:07:31.835+00:00", "event": "post.retrieval.completed", "run_id": "a1448d250085495999162461bb781e0c", "phase": "investigation", "tool_name": "molt_get_post", "status": "success", "duration_ms": null}
+{"timestamp": "2026-11-27T12:07:31.838+00:00", "event": "comments.retrieval.completed", "run_id": "a1448d250085495999162461bb781e0c", "phase": "investigation", "tool_name": "molt_get_comments", "status": "success", "duration_ms": null}
+{"timestamp": "2026-11-27T12:07:31.842+00:00", "event": "evaluation.completed", "run_id": "a1448d250085495999162461bb781e0c", "phase": "evaluation", "next_action": "finish", "goal_complete": true}
+{"timestamp": "2026-11-27T12:07:31.845+00:00", "event": "social_action.selected", "run_id": "a1448d250085495999162461bb781e0c", "phase": "social_action", "tool_name": "molt_create_comment", "status": "success"}
+{"timestamp": "2026-11-27T12:07:31.849+00:00", "event": "social_action.submitted", "run_id": "a1448d250085495999162461bb781e0c", "phase": "social_action", "tool_name": "molt_create_comment", "status": "success"}
+{"timestamp": "2026-11-27T12:07:31.852+00:00", "event": "social_action.confirmed", "run_id": "a1448d250085495999162461bb781e0c", "phase": "social_action", "tool_name": "molt_create_comment", "status": "success"}
+social_action.confirmed | cycle_id=a1448d250085495999162461bb781e0c | tool=molt_create_comment | status=success
+{"timestamp": "2026-11-27T12:07:31.858+00:00", "event": "memory.persistence.completed", "run_id": "a1448d250085495999162461bb781e0c", "phase": "persistence"}
+memory.persistence.completed | cycle_id=a1448d250085495999162461bb781e0c
+{"timestamp": "2026-11-27T12:07:31.861+00:00", "event": "cycle.completed", "run_id": "a1448d250085495999162461bb781e0c", "phase": "complete", "outcome": "participation_succeeded", "action_status": "success", "duration_ms": 80.042}
+Moltbook cycle completed | cycle_id=a1448d250085495999162461bb781e0c | auth=authenticated | inspected=1 | evaluated=1 | action=molt_create_comment | action_status=success | action_attempted=True | action_succeeded=True | success=True | model_calls=0 | tokens=0 | duration_ms=80.042 | estimated_cost_usd=None
+Starting Moltbook activity cycle | cycle_id=57c556ae622c4e528113ff2eb131d296
+{"timestamp": "2026-11-27T12:07:32.003+00:00", "event": "cycle.started", "run_id": "57c556ae622c4e528113ff2eb131d296", "phase": "authentication"}
+authentication.succeeded | cycle_id=57c556ae622c4e528113ff2eb131d296 | phase=preflight
+{"timestamp": "2026-11-27T12:07:32.007+00:00", "event": "authentication.succeeded", "run_id": "57c556ae622c4e528113ff2eb131d296", "phase": "preflight", "status": "authenticated"}
+{"timestamp": "2026-11-27T12:07:32.011+00:00", "event": "feed.retrieval.started", "run_id": "57c556ae622c4e528113ff2eb131d296", "phase": "discovery"}
+Moltbook write action failed | action=create_comment | status=failed | error_type=MoltbookAPIError | http_status=400
+{"timestamp": "2026-11-27T12:07:32.055+00:00", "event": "feed.retrieval.completed", "run_id": "57c556ae622c4e528113ff2eb131d296", "phase": "discovery", "tool_name": "molt_get_feed", "status": "success", "duration_ms": null}
+{"timestamp": "2026-11-27T12:07:32.059+00:00", "event": "candidate.selected", "run_id": "57c556ae622c4e528113ff2eb131d296", "phase": "investigation", "candidate_index": 1}
+{"timestamp": "2026-11-27T12:07:32.061+00:00", "event": "post.retrieval.completed", "run_id": "57c556ae622c4e528113ff2eb131d296", "phase": "investigation", "tool_name": "molt_get_post", "status": "success", "duration_ms": null}
+{"timestamp": "2026-11-27T12:07:32.065+00:00", "event": "comments.retrieval.completed", "run_id": "57c556ae622c4e528113ff2eb131d296", "phase": "investigation", "tool_name": "molt_get_comments", "status": "success", "duration_ms": null}
+{"timestamp": "2026-11-27T12:07:32.069+00:00", "event": "evaluation.completed", "run_id": "57c556ae622c4e528113ff2eb131d296", "phase": "evaluation", "next_action": "finish", "goal_complete": true}
+{"timestamp": "2026-11-27T12:07:32.072+00:00", "event": "social_action.selected", "run_id": "57c556ae622c4e528113ff2eb131d296", "phase": "social_action", "tool_name": "molt_create_comment", "status": "failed"}
+{"timestamp": "2026-11-27T12:07:32.076+00:00", "event": "social_action.submitted", "run_id": "57c556ae622c4e528113ff2eb131d296", "phase": "social_action", "tool_name": "molt_create_comment", "status": "failed"}
+{"timestamp": "2026-11-27T12:07:32.079+00:00", "event": "social_action.failed", "run_id": "57c556ae622c4e528113ff2eb131d296", "phase": "social_action", "tool_name": "molt_create_comment", "status": "failed"}
+social_action.failed | cycle_id=57c556ae622c4e528113ff2eb131d296 | tool=molt_create_comment | status=failed
+{"timestamp": "2026-11-27T12:07:32.086+00:00", "event": "memory.persistence.completed", "run_id": "57c556ae622c4e528113ff2eb131d296", "phase": "persistence"}
+memory.persistence.completed | cycle_id=57c556ae622c4e528113ff2eb131d296
+{"timestamp": "2026-11-27T12:07:32.089+00:00", "event": "cycle.failed", "run_id": "57c556ae622c4e528113ff2eb131d296", "phase": "complete", "outcome": "failed_social_action", "action_status": "failed", "duration_ms": 80.369}
+Moltbook cycle completed | cycle_id=57c556ae622c4e528113ff2eb131d296 | auth=authenticated | inspected=1 | evaluated=1 | action=molt_create_comment | action_status=failed | action_attempted=True | action_succeeded=False | success=False | model_calls=0 | tokens=0 | duration_ms=80.369 | estimated_cost_usd=None
+Starting Moltbook activity cycle | cycle_id=98fb380273a642dbb78c9df20cbc3304
+{"timestamp": "2026-11-27T12:07:32.254+00:00", "event": "cycle.started", "run_id": "98fb380273a642dbb78c9df20cbc3304", "phase": "authentication"}
+authentication.succeeded | cycle_id=98fb380273a642dbb78c9df20cbc3304 | phase=preflight
+{"timestamp": "2026-11-27T12:07:32.257+00:00", "event": "authentication.succeeded", "run_id": "98fb380273a642dbb78c9df20cbc3304", "phase": "preflight", "status": "authenticated"}
+{"timestamp": "2026-11-27T12:07:32.261+00:00", "event": "feed.retrieval.started", "run_id": "98fb380273a642dbb78c9df20cbc3304", "phase": "discovery"}
+Moltbook write action failed | action=create_comment | status=unknown | error_type=MoltbookAPIError | http_status=None
+{"timestamp": "2026-11-27T12:07:32.297+00:00", "event": "feed.retrieval.completed", "run_id": "98fb380273a642dbb78c9df20cbc3304", "phase": "discovery", "tool_name": "molt_get_feed", "status": "success", "duration_ms": null}
+{"timestamp": "2026-11-27T12:07:32.300+00:00", "event": "candidate.selected", "run_id": "98fb380273a642dbb78c9df20cbc3304", "phase": "investigation", "candidate_index": 1}
+{"timestamp": "2026-11-27T12:07:32.303+00:00", "event": "post.retrieval.completed", "run_id": "98fb380273a642dbb78c9df20cbc3304", "phase": "investigation", "tool_name": "molt_get_post", "status": "success", "duration_ms": null}
+{"timestamp": "2026-11-27T12:07:32.307+00:00", "event": "comments.retrieval.completed", "run_id": "98fb380273a642dbb78c9df20cbc3304", "phase": "investigation", "tool_name": "molt_get_comments", "status": "success", "duration_ms": null}
+{"timestamp": "2026-11-27T12:07:32.310+00:00", "event": "evaluation.completed", "run_id": "98fb380273a642dbb78c9df20cbc3304", "phase": "evaluation", "next_action": "finish", "goal_complete": true}
+{"timestamp": "2026-11-27T12:07:32.314+00:00", "event": "social_action.selected", "run_id": "98fb380273a642dbb78c9df20cbc3304", "phase": "social_action", "tool_name": "molt_create_comment", "status": "unknown"}
+{"timestamp": "2026-11-27T12:07:32.317+00:00", "event": "social_action.submitted", "run_id": "98fb380273a642dbb78c9df20cbc3304", "phase": "social_action", "tool_name": "molt_create_comment", "status": "unknown"}
+{"timestamp": "2026-11-27T12:07:32.320+00:00", "event": "social_action.unknown", "run_id": "98fb380273a642dbb78c9df20cbc3304", "phase": "social_action", "tool_name": "molt_create_comment", "status": "unknown"}
+social_action.unknown | cycle_id=98fb380273a642dbb78c9df20cbc3304 | tool=molt_create_comment | status=unknown
+{"timestamp": "2026-11-27T12:07:32.327+00:00", "event": "memory.persistence.completed", "run_id": "98fb380273a642dbb78c9df20cbc3304", "phase": "persistence"}
+memory.persistence.completed | cycle_id=98fb380273a642dbb78c9df20cbc3304
+{"timestamp": "2026-11-27T12:07:32.330+00:00", "event": "cycle.failed", "run_id": "98fb380273a642dbb78c9df20cbc3304", "phase": "complete", "outcome": "uncertain_action", "action_status": "unknown", "duration_ms": 69.8}
+Moltbook cycle completed | cycle_id=98fb380273a642dbb78c9df20cbc3304 | auth=authenticated | inspected=1 | evaluated=1 | action=molt_create_comment | action_status=unknown | action_attempted=True | action_succeeded=False | success=False | model_calls=0 | tokens=0 | duration_ms=69.8 | estimated_cost_usd=None

@@ -40,6 +40,13 @@ def main() -> None:
             lease_seconds=max(7200, runtime.agent_loop.config.max_runtime_seconds + 600),
         )
 
+        health = runtime.health.check()
+        logger.info(
+            "runtime.health.checked | status=%s | components=%s",
+            health["status"],
+            {key: value["status"] for key, value in health["components"].items()},
+        )
+
         heartbeat.run()
 
     except KeyboardInterrupt:

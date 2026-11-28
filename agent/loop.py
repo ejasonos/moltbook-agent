@@ -538,9 +538,7 @@ class AgentLoop:
                 ):
                     return state
 
-                # Executor returned no tools.
-                # Let the Planner decide the next phase.
-                state.metadata["continue_executor"] = False
+                self._set_execution_transition(state, evaluation)
 
                 continue
 
@@ -858,9 +856,7 @@ class AgentLoop:
             if self._handle_evaluation(state, evaluation):
                 return state
             
-            # Tool results have been returned.
-            # Allow another Executor turn without replanning.
-            state.metadata["continue_executor"] = True
+            self._set_execution_transition(state, evaluation)
 
             # -----------------------------------------------------
             # CLEAR CURRENT TOOL CALLS
@@ -882,6 +878,21 @@ class AgentLoop:
     # =============================================================
     # EVALUATION CONTROL
     # =============================================================
+
+    @staticmethod
+    def _set_execution_transition(state: AgentState, evaluation) -> None:
+        """Reuse the Executor plan only when explicitly requested."""
+        keep_plan = evaluation.next_action == NextAction.CONTINUE
+        state.metadata["continue_executor"] = keep_plan
+        if keep_plan:
+            state.metadata["last_evaluated_evidence_version"] = state.metadata.get(
+                "evidence_version", 0
+            )
+        else:
+            # A new phase must get a fresh Planner and Evaluator opportunity,
+            # even when its first Executor turn produces no tool call.
+            state.metadata.pop("last_evaluated_evidence_version", None)
+        state.metadata["required_next_phase"] = evaluation.next_action.value
 
     def _handle_evaluation(
         self,
@@ -970,6 +981,18 @@ class AgentLoop:
                 "only the available Moltbook tools. Select at most one "
                 "meaningful social action this cycle; do not repeat an "
                 "uncertain or challenged write."
+            )
+        elif evaluation.next_action == NextAction.INVESTIGATE:
+            phase_instruction = (
+                "Enter the INVESTIGATE phase. The Planner must create a new "
+                "inspection plan from the missing evidence identified above. "
+                "Do not repeat completed feed discovery; inspect promising "
+                "candidate posts and comments as appropriate."
+            )
+        elif evaluation.next_action == NextAction.CONTINUE:
+            phase_instruction = (
+                "Continue the current Executor plan for one more turn. Do not "
+                "start a different phase or repeat completed tool calls."
             )
         else:
             phase_instruction = (

@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
+from config.api_limits import max_api_requests_per_minute
+
 
 def _positive_int(name: str, default: int) -> int:
     value = os.getenv(name)
@@ -53,10 +55,7 @@ class MoltPolicy:
         default_factory=lambda: _positive_int("MOLTBOOK_INTERNAL_MIN_COMMENT_INTERVAL_SECONDS", 20)
     )
     max_api_requests_per_minute: int = field(
-        default_factory=lambda: min(
-            100,
-            _positive_int("MOLTBOOK_MAX_REQUESTS_PER_MINUTE", 100),
-        )
+        default_factory=max_api_requests_per_minute
     )
 
     allow_posts: bool = True
@@ -158,25 +157,6 @@ class MoltPolicy:
                 20 if is_new_agent else 50,
             )
             status_sql = "('pending', 'success', 'verification_required', 'unknown')"
-
-            minute_ago = (now - timedelta(minutes=1)).isoformat()
-            recent_writes = db.execute(
-                "SELECT COUNT(*) FROM interactions WHERE created_at >= ? "
-                f"AND status IN {status_sql}",
-                (minute_ago,),
-            ).fetchone()[0]
-            if recent_writes >= self.max_api_requests_per_minute:
-                oldest = db.execute(
-                    "SELECT MIN(created_at) FROM interactions WHERE created_at >= ? "
-                    f"AND status IN {status_sql}",
-                    (minute_ago,),
-                ).fetchone()[0]
-                oldest_dt = _parse_utc(oldest)
-                retry_after = max(
-                    1,
-                    math.ceil(60 - (now - oldest_dt).total_seconds()),
-                ) if oldest_dt else 60
-                return self._reject("api_request_rate_limit", retry_after)
 
             cooldown = 0
             daily_limit: int | None = None

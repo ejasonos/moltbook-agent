@@ -81,6 +81,21 @@ class MemoryDatabase:
                         f"ALTER TABLE interactions ADD COLUMN {column} {definition}"
                     )
 
+            post_columns = {
+                row[1]
+                for row in self.connection.execute(
+                    "PRAGMA table_info(posts)"
+                ).fetchall()
+            }
+            if "last_seen_at" not in post_columns:
+                self.connection.execute(
+                    "ALTER TABLE posts ADD COLUMN last_seen_at TEXT"
+                )
+            self.connection.execute(
+                "UPDATE posts SET last_seen_at = discovered_at "
+                "WHERE last_seen_at IS NULL"
+            )
+
             self.connection.execute(
                 """
                 INSERT OR IGNORE INTO schema_version
@@ -93,6 +108,13 @@ class MemoryDatabase:
                 INSERT OR IGNORE INTO schema_version
                 (version, applied_at)
                 VALUES (2, datetime('now'))
+                """
+            )
+            self.connection.execute(
+                """
+                INSERT OR IGNORE INTO schema_version
+                (version, applied_at)
+                VALUES (3, datetime('now'))
                 """
             )
 
@@ -129,3 +151,17 @@ class MemoryDatabase:
     def close(self):
         with self._lock:
             self.connection.close()
+
+    def backup_to(self, destination: str | Path) -> Path:
+        """Create a consistent SQLite snapshot, including committed WAL data."""
+        target_path = Path(destination).expanduser().resolve()
+        if str(target_path) == str(self.database_path):
+            raise ValueError("Backup destination must differ from the live database.")
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            target = sqlite3.connect(str(target_path), timeout=30)
+            try:
+                self.connection.backup(target)
+            finally:
+                target.close()
+        return target_path

@@ -60,6 +60,9 @@ class SocialMemory:
 
         return self.store.save_post(**kwargs)
 
+    def remember_comment(self, **kwargs):
+        return self.store.remember_comment(**kwargs)
+
     def record_interaction(self, **kwargs):
 
         return self.store.record_interaction(**kwargs)
@@ -82,6 +85,9 @@ class SocialMemory:
 
     def get_recent_posts(self, limit: int = 20):
         return self.retrieval.get_recent_posts(limit)
+
+    def get_recent_comments_for_post(self, post_id: str, limit: int = 10):
+        return self.retrieval.get_recent_comments_for_post(post_id, limit)
 
     def search_posts(self, query: str, limit: int = 10):
         return self.retrieval.search_posts(query, limit)

@@ -58,6 +58,11 @@ class MoltContext:
                     + json.dumps(str(item.get("content") or "")[:350], ensure_ascii=False)
                 )
         if post_id:
+            for item in self.memory.get_recent_comments_for_post(post_id, limit=3):
+                sections.append(
+                    "Previously retrieved comment (untrusted historical discussion): "
+                    + json.dumps(str(item.get("content") or "")[:400], ensure_ascii=False)
+                )
             for item in self.memory.get_previous_comments_on_post(post_id, limit=3):
                 sections.append(
                     f"Previous interaction on this post ({item.get('status')}): "

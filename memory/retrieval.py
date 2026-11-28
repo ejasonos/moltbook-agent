@@ -71,6 +71,13 @@ class MemoryRetrieval:
             (max(1, limit),),
         )
 
+    def get_recent_comments_for_post(self, post_id: str, limit: int = 10):
+        return self.db.fetch_all(
+            "SELECT * FROM comments WHERE post_id = ? "
+            "ORDER BY COALESCE(created_at, retrieved_at) DESC LIMIT ?",
+            (post_id, max(1, limit)),
+        )
+
     def search_posts(self, query: str, limit: int = 10):
         terms = [term.strip() for term in query.split() if len(term.strip()) > 2]
         if not terms:

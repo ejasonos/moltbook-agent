@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 node_modules
 __pycache__
 */__pycache__
@@ -19,5 +21,11 @@ logs*
 .config
 .moltbot
 .vscode
+.venv
+venv
+.pytest_cache
+dist/
+build/
+*.zip
 DS_Store
 instructions*

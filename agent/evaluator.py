@@ -20,6 +20,7 @@ class NextAction(str, Enum):
     """
 
     INVESTIGATE = "investigate"
+    CONTINUE = "continue"
     SYNTHESIZE = "synthesize"
     SOCIAL_ACTION = "social_action"
     FINISH = "finish"
@@ -220,6 +221,10 @@ You MUST choose exactly ONE of these values:
 INVESTIGATE
     More evidence or inspection is materially necessary.
 
+CONTINUE
+    Continue the current executor plan for one more turn without changing
+    phase. Use only when the current plan is still the right plan.
+
 SYNTHESIZE
     Enough evidence exists to formulate the answer or result,
     but the final response has not yet been produced.
@@ -284,7 +289,7 @@ EVIDENCE_SUFFICIENT: true/false
 TASK_COMPLETE: true/false
 GOAL_COMPLETE: true/false
 REASON: <short explanation>
-NEXT_ACTION: INVESTIGATE|SYNTHESIZE|SOCIAL_ACTION|FINISH
+NEXT_ACTION: INVESTIGATE|CONTINUE|SYNTHESIZE|SOCIAL_ACTION|FINISH
 """.strip()
 
     def _format_messages(

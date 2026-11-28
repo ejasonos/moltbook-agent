@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from moltbook.policy import MoltPolicy
+from utils.logging import log_event
 
 
 logger = logging.getLogger("local_agent.moltbook.heartbeat")
+
+FAILURE_RETRY_BASE_SECONDS = 5
+FAILURE_RETRY_MAX_SECONDS = 30
 
 
 class MoltHeartbeat:
@@ -21,13 +26,16 @@ class MoltHeartbeat:
         policy: MoltPolicy | None = None,
         memory=None,
         *,
-        max_backoff_seconds: int = 86400,
+        max_backoff_seconds: int = FAILURE_RETRY_MAX_SECONDS,
         lease_seconds: int = 7200,
     ):
         self.callback = callback
         self.policy = policy or MoltPolicy()
         self.memory = memory
-        self.max_backoff_seconds = max(60, max_backoff_seconds)
+        self.max_backoff_seconds = min(
+            FAILURE_RETRY_MAX_SECONDS,
+            max(1, max_backoff_seconds),
+        )
         self.lease_seconds = max(60, lease_seconds)
         self.running = False
         self._stop_event = threading.Event()
@@ -41,6 +49,8 @@ class MoltHeartbeat:
 
     def run(self):
         self.running = True
+        self._set_state("heartbeat_status", "running")
+        self._set_state("heartbeat_process_id", str(os.getpid()))
         old_handlers = self._install_signal_handlers()
         interval = self.policy.get_heartbeat_interval()
         next_run = self._initial_schedule()
@@ -94,8 +104,9 @@ class MoltHeartbeat:
                 else:
                     failures += 1
                     delay = min(
-                        max(interval, 60) * (2 ** min(failures - 1, 8)),
-                        max(self.max_backoff_seconds, interval),
+                        FAILURE_RETRY_BASE_SECONDS
+                        * (2 ** min(failures - 1, 3)),
+                        self.max_backoff_seconds,
                     )
                 self._set_state("consecutive_failure_count", str(failures))
                 next_run = datetime.now(timezone.utc) + timedelta(seconds=delay)
@@ -106,8 +117,18 @@ class MoltHeartbeat:
                     failures,
                     error,
                 )
+                log_event(
+                    "heartbeat.scheduled",
+                    run_id=getattr(self, "_last_cycle_run_id", None) or self._owner,
+                    phase="heartbeat",
+                    delay_seconds=delay,
+                    consecutive_failures=failures,
+                    outcome=self._get_state("cycle_outcome", "unknown"),
+                )
         finally:
             self.running = False
+            self._set_state("heartbeat_status", "stopped")
+            self._set_state("heartbeat_process_id", "")
             self._restore_signal_handlers(old_handlers)
             logger.info("Penelope_360 heartbeat stopped.")
 
@@ -117,7 +138,10 @@ class MoltHeartbeat:
             self._set_state("cycle_status", "running")
         try:
             result = self.callback()
+            self._last_cycle_run_id = getattr(result, "cycle_id", None)
             success = self._result_succeeded(result)
+            outcome = getattr(result, "outcome", None)
+            action_status = getattr(result, "action_status", None)
             error = getattr(result, "error", None)
             if not success and result is not None:
                 errors = getattr(result, "unresolved_errors", None)
@@ -125,19 +149,30 @@ class MoltHeartbeat:
                     error = "; ".join(str(item) for item in errors)
                 error = error or "Cycle completed with unresolved work."
             finished = datetime.now(timezone.utc).isoformat()
-            self._set_state("cycle_status", "success" if success else "failed")
-            self._set_state("last_cycle_completion", finished)
-            if success:
-                self._set_state("last_successful_cycle", finished)
-                self._set_state("last_error", "")
-            else:
-                self._set_state("last_error", str(error or "Cycle failed.")[:1000])
+            classification = str(outcome or ("success" if success else "failure"))
+            if not success:
+                classification = str(outcome or action_status or "cycle_failure")
+                error = f"{classification}: {error or 'Cycle failed.'}"
+            try:
+                if self.memory is not None:
+                    self.memory.store.record_heartbeat_outcome(
+                        success=success,
+                        outcome=classification,
+                        action_status=str(action_status or "not_selected"),
+                        completion_time=finished,
+                        error=error,
+                    )
+            except Exception:
+                success = False
+                error = "heartbeat database persistence failed"
+                logger.exception("Could not persist heartbeat cycle outcome.")
             return success, None if success else str(error or "Cycle failed.")
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
             logger.exception("Molt cycle failed; the worker will retry on its schedule.")
             finished = datetime.now(timezone.utc).isoformat()
             self._set_state("cycle_status", "failed")
+            self._set_state("cycle_outcome", "infrastructure_failure")
             self._set_state("last_cycle_completion", finished)
             self._set_state("last_error", error[:1000])
             return False, error[:1000]
@@ -162,8 +197,34 @@ class MoltHeartbeat:
                 parsed = datetime.fromisoformat(next_scheduled.replace("Z", "+00:00"))
                 if parsed.tzinfo is None:
                     parsed = parsed.replace(tzinfo=timezone.utc)
-                if parsed > datetime.now(timezone.utc):
-                    logger.info("Resuming persisted heartbeat schedule.")
+                now = datetime.now(timezone.utc)
+                if parsed > now:
+                    if self._get_state("cycle_status") == "failed":
+                        try:
+                            failures = max(
+                                1,
+                                int(self._get_state("consecutive_failure_count", "1") or "1"),
+                            )
+                        except ValueError:
+                            failures = 1
+                        retry_delay = min(
+                            FAILURE_RETRY_BASE_SECONDS
+                            * (2 ** min(failures - 1, 3)),
+                            self.max_backoff_seconds,
+                        )
+                        retry_at = now + timedelta(seconds=retry_delay)
+                        if parsed > retry_at:
+                            parsed = retry_at
+                            self._set_state(
+                                "next_scheduled_cycle",
+                                parsed.isoformat(),
+                            )
+                        logger.info(
+                            "Resuming failed cycle with short retry | delay_seconds=%s",
+                            max(0, int((parsed - now).total_seconds())),
+                        )
+                    else:
+                        logger.info("Resuming persisted heartbeat schedule.")
                     return parsed.astimezone(timezone.utc)
             except ValueError:
                 logger.warning("Ignoring invalid persisted heartbeat schedule.")
@@ -199,8 +260,10 @@ class MoltHeartbeat:
 
     def _set_state(self, key: str, value: str):
         if self.memory is None:
-            return
+            return True
         try:
             self.memory.store.set_state(key, value)
+            return True
         except Exception:
             logger.warning("Could not persist heartbeat state | state_key=%s", key)
+            return False

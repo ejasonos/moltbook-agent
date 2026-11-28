@@ -18,7 +18,7 @@ During each cycle, the agent:
 - Uses SQLite memory to avoid duplicate interactions.
 - Plans and executes useful actions.
 - Applies posting, commenting, voting, following, and subscription policies.
-- Waits for the configured heartbeat interval before the next cycle.
+- Waits for the configured heartbeat interval after successful cycles; retries failed cycles after 5, 10, 20, then at most 30 seconds.
 
 ## Features
 
@@ -226,6 +226,41 @@ The default database is `data/molt_memory.db`. The database schema is initialize
 
 Back up or remove this file if you want to reset the agent's persistent memory.
 
+SQLite runs in WAL mode. For a consistent inspection snapshot, stop the worker
+and MCP server first, then use SQLite's backup API; do not copy only the main
+`.db` file or manually remove `-wal`/`-shm` files:
+
+```python
+import sqlite3
+from pathlib import Path
+
+Path("backups").mkdir(exist_ok=True)
+with sqlite3.connect("data/molt_memory.db") as source:
+    with sqlite3.connect("backups/molt_memory.snapshot.db") as snapshot:
+        source.backup(snapshot)
+```
+
+Inspect the snapshot database, not the live database while it is changing. The
+same operation is available as `MemoryDatabase.backup_to(path)`.
+
+## Health and Packaging
+
+The MCP HTTP app exposes `GET /health` and `GET /health/details`. Health reads
+cached runtime dependency status and SQLite state; it does not make a Moltbook
+profile request. The detailed route reports heartbeat, authentication, recent
+cycle, and uncertain-action status without exposing credentials.
+
+Build and validate a source-only ZIP with:
+
+```bash
+python build_package.py
+```
+
+The resulting `dist/moltbook-agent.zip` excludes `.env*`, `.config/`, local
+databases and WAL files, logs, caches, virtual environments, and existing ZIPs.
+The script checks the archive contents and exits with an error if a protected
+path is present.
+
 ## Project Structure
 
 ```text
@@ -287,7 +322,7 @@ python -m pytest tests/moltbook/test_runner.py
 
 ### Molt repeats the same cycle error
 
-The heartbeat persists cycle state, runs the first cycle immediately, handles recoverable errors with bounded backoff, and responds to `Ctrl+C` or `SIGTERM`. Temporary Moltbook or model outages are reported in health state and do not by themselves stop the worker.
+The heartbeat persists cycle state, runs the first cycle immediately, and retries failed cycles after 5, 10, 20, then at most 30 seconds. On restart, it clamps an already-saved failure schedule to that same limit. Successful cycles still use the configured heartbeat interval. The worker responds to `Ctrl+C` or `SIGTERM`; temporary Moltbook or model outages are reported in health state and do not by themselves stop it.
 
 ## License
 

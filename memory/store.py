@@ -99,15 +99,17 @@ class MemoryStore:
                 title,
                 content,
                 created_at,
-                discovered_at
+                discovered_at,
+                last_seen_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(post_id) DO UPDATE SET
                 author_id = COALESCE(excluded.author_id, posts.author_id),
                 submolt = COALESCE(excluded.submolt, posts.submolt),
                 title = COALESCE(excluded.title, posts.title),
                 content = COALESCE(excluded.content, posts.content),
-                created_at = COALESCE(excluded.created_at, posts.created_at)
+                created_at = COALESCE(excluded.created_at, posts.created_at),
+                last_seen_at = excluded.last_seen_at
             """,
             (
                 post_id,
@@ -117,6 +119,41 @@ class MemoryStore:
                 content,
                 created_at,
                 self.now(),
+                self.now(),
+            ),
+        )
+
+    def remember_comment(
+        self,
+        comment_id: str,
+        post_id: str,
+        content: str,
+        *,
+        author_id: str | None = None,
+        parent_comment_id: str | None = None,
+        created_at: str | None = None,
+    ) -> None:
+        if not str(comment_id).strip() or not str(post_id).strip():
+            raise ValueError("Comment and parent post identifiers are required.")
+        if not str(content).strip():
+            return
+        now = self.now()
+        self.db.execute(
+            """INSERT INTO comments
+               (comment_id, post_id, parent_comment_id, author_id, content,
+                created_at, retrieved_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(comment_id) DO UPDATE SET
+                 post_id = excluded.post_id,
+                 parent_comment_id = COALESCE(excluded.parent_comment_id, comments.parent_comment_id),
+                 author_id = COALESCE(excluded.author_id, comments.author_id),
+                 content = excluded.content,
+                 created_at = COALESCE(excluded.created_at, comments.created_at),
+                 retrieved_at = excluded.retrieved_at""",
+            (
+                str(comment_id), str(post_id), parent_comment_id,
+                str(author_id) if author_id else None, str(content).strip(),
+                created_at, now,
             ),
         )
 
@@ -301,6 +338,61 @@ class MemoryStore:
         )
 
         return result["state_value"] if result else None
+
+    def record_heartbeat_outcome(
+        self,
+        *,
+        success: bool,
+        outcome: str,
+        action_status: str,
+        completion_time: str,
+        error: str | None = None,
+    ) -> None:
+        """Persist a cycle's heartbeat classification as one SQLite transaction."""
+        values = {
+            "cycle_status": "success" if success else "failed",
+            "cycle_outcome": outcome,
+            "cycle_action_status": action_status,
+            "last_cycle_completion": completion_time,
+            "last_error": "" if success else str(error or "Cycle failed.")[:1000],
+        }
+        if success:
+            values["last_successful_cycle"] = completion_time
+        now = self.now()
+        with self.db.transaction() as connection:
+            connection.executemany(
+                """INSERT INTO heartbeat_state(state_key, state_value, updated_at)
+                   VALUES (?, ?, ?) ON CONFLICT(state_key) DO UPDATE SET
+                   state_value = excluded.state_value,
+                   updated_at = excluded.updated_at""",
+                [(key, value, now) for key, value in values.items()],
+            )
+
+    def persist_cycle_result(
+        self,
+        *,
+        serialized_result: str,
+        completion_time: str,
+        outcome: str,
+        success: bool,
+    ) -> None:
+        """Atomically persist cycle summary and its successful timestamp."""
+        values = {
+            "last_cycle_result": serialized_result,
+            "last_cycle_completion": completion_time,
+            "cycle_outcome": outcome,
+        }
+        if success:
+            values["last_successful_cycle"] = completion_time
+        now = self.now()
+        with self.db.transaction() as connection:
+            connection.executemany(
+                """INSERT INTO heartbeat_state(state_key, state_value, updated_at)
+                   VALUES (?, ?, ?) ON CONFLICT(state_key) DO UPDATE SET
+                   state_value = excluded.state_value,
+                   updated_at = excluded.updated_at""",
+                [(key, value, now) for key, value in values.items()],
+            )
 
     def acquire_heartbeat_lease(self, owner: str, lease_seconds: int) -> bool:
         now_dt = datetime.now(timezone.utc)
