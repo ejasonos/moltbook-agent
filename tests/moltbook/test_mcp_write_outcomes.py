@@ -57,7 +57,12 @@ def test_api_rejection_is_persisted_as_failed(tool_server):
 def test_unknown_write_is_reconciled_once_and_never_resubmitted(tool_server, monkeypatch):
     module, memory = tool_server
     operation_calls = []
-    monkeypatch.setattr(module, "_reconcile_uncertain_write", lambda *_args: None)
+    reconciliation_calls = []
+    monkeypatch.setattr(
+        module,
+        "_reconcile_uncertain_write",
+        lambda *_args: reconciliation_calls.append("checked") or None,
+    )
 
     def timeout_after_send():
         operation_calls.append("submitted")
@@ -69,6 +74,7 @@ def test_unknown_write_is_reconciled_once_and_never_resubmitted(tool_server, mon
 
     assert response["status"] == "unknown"
     assert operation_calls == ["submitted"]
+    assert reconciliation_calls == ["checked"]
     assert memory.database.fetch_one(
         "SELECT status FROM interactions WHERE target_id = 'post-unknown'"
     )["status"] == "unknown"

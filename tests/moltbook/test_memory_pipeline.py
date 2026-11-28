@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import importlib
 import os
+import sqlite3
 
 import pytest
 
-from memory import SocialMemory
+from memory import MemoryDatabase, SocialMemory
 
 
 @pytest.fixture(scope="module")
@@ -95,3 +96,27 @@ def test_database_backup_api_creates_a_readable_snapshot(tmp_path, memory):
         assert copy.search_memories("snapshot")
     finally:
         copy.close()
+
+
+def test_additive_migration_preserves_existing_post_rows(tmp_path):
+    database_path = tmp_path / "legacy.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "CREATE TABLE posts (post_id TEXT PRIMARY KEY, author_id TEXT, "
+            "submolt TEXT, title TEXT, content TEXT, created_at TEXT, discovered_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO posts(post_id, title, content, discovered_at) "
+            "VALUES ('legacy-post', 'Old record', 'Keep me', '2025-01-01T00:00:00+00:00')"
+        )
+
+    database = MemoryDatabase(database_path)
+    try:
+        row = database.fetch_one("SELECT * FROM posts WHERE post_id = 'legacy-post'")
+        assert row["content"] == "Keep me"
+        assert row["last_seen_at"] == row["discovered_at"]
+        assert database.fetch_one(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'comments'"
+        )
+    finally:
+        database.close()

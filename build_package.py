@@ -8,6 +8,7 @@ import zipfile
 EXCLUDED_PARTS = {
     ".git", ".config", "data", "logs", "__pycache__", ".pytest_cache",
     ".venv", "venv", "node_modules", "dist", "build", ".mypy_cache",
+    ".codex", ".agents",
 }
 SENSITIVE_NAMES = {
     "credentials.json", "secrets.json", "id_rsa", "id_ed25519",

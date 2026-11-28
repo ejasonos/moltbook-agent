@@ -101,6 +101,15 @@ def test_authentication_failure_and_database_failure_are_classified():
     assert persistence_failure.outcome == "infrastructure_failure"
 
 
+def test_independent_reconciliation_is_recorded_as_verified():
+    result = cycle_result(
+        action_verified=True,
+        action_result={"success": True, "status": "success", "reconciled": True},
+    )
+    assert result.success is True
+    assert result.action_verified is True
+
+
 class FakeMCP:
     def call_tool(self, _name, _arguments):
         return SimpleNamespace(
@@ -190,3 +199,28 @@ def test_cycle_result_persistence_exception_fails_result():
     assert result.persistence_succeeded is False
     assert result.success is False
     assert result.outcome == "infrastructure_failure"
+
+
+def test_authentication_failure_stops_cycle_and_persists_classification(tmp_path):
+    memory = SocialMemory(tmp_path / "auth-failure.db")
+
+    class FailedMCP:
+        def call_tool(self, _name, _arguments):
+            return SimpleNamespace(
+                success=False,
+                structured_content={"success": False, "http_status": 401, "error": "Unauthorized"},
+                content=None,
+                error="Unauthorized",
+            )
+
+    loop = FakeAgentLoop()
+    loop.mcp_client = FailedMCP()
+    try:
+        result = MoltRunner(loop, memory=memory).run_cycle()
+        assert result.success is False
+        assert result.authentication_status == "failed"
+        assert result.outcome == "authentication_failure"
+        stored = json.loads(memory.store.get_state("last_cycle_result"))
+        assert stored["outcome"] == "authentication_failure"
+    finally:
+        memory.close()

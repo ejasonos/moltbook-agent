@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
+from starlette.routing import Route
 
 from moltbook_tools_http import get_memory, mcp
 from runtime.health import RuntimeHealth
@@ -36,10 +35,6 @@ def health_details(request: Request):
     )
 
 
-app = Starlette(
-    routes=[
-        Route("/health", health, methods=["GET"]),
-        Route("/health/details", health_details, methods=["GET"]),
-        Mount("/", app=mcp.http_app(stateless_http=True)),
-    ]
-)
+app = mcp.http_app(stateless_http=True)
+app.router.routes.insert(0, Route("/health/details", health_details, methods=["GET"]))
+app.router.routes.insert(0, Route("/health", health, methods=["GET"]))

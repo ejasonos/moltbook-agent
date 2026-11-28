@@ -29,3 +29,5 @@ build/
 *.zip
 DS_Store
 instructions*
+.config*
+.moltbook*

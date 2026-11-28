@@ -70,9 +70,16 @@ def pipeline(tmp_path, monkeypatch):
             def operation():
                 if self.mode == "failed":
                     raise MoltbookAPIError("Moltbook rejected the comment", status_code=400)
-                if self.mode == "unknown":
+                if self.mode in {"unknown", "reconciled"}:
                     raise MoltbookAPIError("write timed out", outcome_unknown=True)
                 return {"comment": {"id": "pipeline-comment-created"}}
+
+            if self.mode == "reconciled":
+                monkeypatch.setattr(
+                    tools,
+                    "_reconcile_uncertain_write",
+                    lambda *_args: {"comment": {"id": "pipeline-comment-created"}},
+                )
 
             response = tools._execute_write(
                 "create_comment",
@@ -98,7 +105,7 @@ def pipeline(tmp_path, monkeypatch):
     memory.close()
 
 
-@pytest.mark.parametrize("mode", ["abstain", "success", "failed", "unknown"])
+@pytest.mark.parametrize("mode", ["abstain", "success", "reconciled", "failed", "unknown"])
 def test_full_mocked_cycle_persists_investigation_and_classifies_action(pipeline, tmp_path, mode):
     tools, memory, PipelineLoop = pipeline
     result = MoltRunner(PipelineLoop(mode), memory=memory).run_cycle()
@@ -111,9 +118,10 @@ def test_full_mocked_cycle_persists_investigation_and_classifies_action(pipeline
         assert result.success is True
         assert result.outcome == "abstained"
         assert result.action_succeeded is False
-    elif mode == "success":
+    elif mode in {"success", "reconciled"}:
         assert result.success is True
         assert result.action_succeeded is True
+        assert result.action_verified is (mode == "reconciled")
         assert result.resource_id == "pipeline-comment-created"
         assert result.outcome == "participation_succeeded"
         assert memory.database.fetch_one(

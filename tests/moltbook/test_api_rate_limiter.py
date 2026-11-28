@@ -111,3 +111,30 @@ def test_post_does_not_retry_429(tmp_path):
 
     assert raised.value.outcome_unknown is False
     assert len(client.session.calls) == 1
+
+
+def test_failed_http_attempt_still_consumes_a_rate_slot(tmp_path):
+    database_path = tmp_path / "shared.db"
+    limiter = SharedAPIRateLimiter(database_path, limit=10)
+    client = MoltbookClient(api_key="test-key", rate_limiter=limiter)
+    client.session = FakeSession([FakeResponse(400)])
+
+    with pytest.raises(MoltbookAPIError):
+        client.get("/feed")
+
+    with sqlite3.connect(database_path) as connection:
+        count = connection.execute("SELECT COUNT(*) FROM moltbook_api_requests").fetchone()[0]
+    assert count == 1
+
+
+def test_retry_after_header_blocks_other_client_instances(tmp_path):
+    database_path = tmp_path / "shared.db"
+    limiter_one = SharedAPIRateLimiter(database_path, limit=10)
+    limiter_two = SharedAPIRateLimiter(database_path, limit=10)
+    delay = limiter_one.observe_response({"Retry-After": "0.05"}, 429)
+    started = time.monotonic()
+
+    limiter_two.reserve()
+
+    assert delay == pytest.approx(0.05)
+    assert time.monotonic() - started >= 0.04
